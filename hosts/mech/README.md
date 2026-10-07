@@ -24,8 +24,10 @@ and equality proofs are checked but are not emitted as instances.
 The CLI writes JSON to stdout on success. It writes a byte position and a
 diagnostic to stderr and returns a nonzero status on failure.
 
-Replace `domain/schema.mech` and `domain/plans.mech` together. Keep the
-interface described in `domain/README.md`. The shipped domain has two
+Replace `domain/schema.mech` with your design, then run `make plans` to
+generate `domain/plans.mech` from it. `make check` fails when the two files
+do not agree. Keep the interface described in `domain/README.md`.
+The shipped domain has two
 record types, `Item` and `Stock`, and an enum, `Measure`.
 It is a sample to replace with your design. Update the domain tests and
 examples with it. The source language cannot declare new core families.

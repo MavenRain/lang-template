@@ -1,44 +1,49 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { parseSchema, renderPlans } from '../bin/gen-domain.mjs';
 import { run, reject } from './helper.mjs';
 
 const schema = await readFile(new URL('../domain/schema.mech', import.meta.url), 'utf8');
-const families = new Map();
-for (const match of schema.matchAll(/^mu (\w+) : Type 0 with\n((?:\|[^\n]*\n?)+)/gm)) {
-  const constructors = [...match[2].matchAll(/^\| (\w+) : (.+)$/gm)].map(([, name, signature]) => ({
-    name,
-    fields: [...signature.matchAll(/\((\w+) : (\w+)\)/g)].map(([, key, type]) => ({ key, type })),
-    result: signature.split(' -> ').at(-1),
-  }));
-  assert.ok(constructors.length);
-  for (const constructor of constructors) assert.equal(constructor.result, match[1]);
-  families.set(match[1], constructors);
-}
+const plans = await readFile(new URL('../domain/plans.mech', import.meta.url), 'utf8');
+const families = new Map(parseSchema(schema).families.map(family => [family.name, family]));
 assert.equal(families.size, 3, 'the sample schema has three families');
 
-function sample(type, chosen = families.get(type)?.[0]) {
-  if (type === 'Text') return { expression: '"sample"', value: 'sample' };
-  if (type === 'Nat') return { expression: '7', value: 7 };
-  assert.ok(chosen, `sample for ${type}`);
+test('domain/plans.mech is generated from domain/schema.mech', () => {
+  assert.equal(plans, renderPlans(parseSchema(schema)));
+});
+
+// A source expression and its JSON value for a field type or a constructor.
+function sample(type, family = families.get(type.name), chosen = family?.constructors[0]) {
+  if (type.former === 'Option') {
+    const inner = sample(type.inner);
+    return { expression: `some (${inner.expression})`, value: inner.value };
+  }
+  if (type.former === 'List') {
+    const inner = sample(type.inner);
+    return { expression: `cons (${inner.expression}) nil`, value: [inner.value] };
+  }
+  if (type.name === 'Text') return { expression: '"sample"', value: 'sample' };
+  if (type.name === 'Nat') return { expression: '7', value: 7 };
+  if (type.name === 'Flag') return { expression: 'flagYes', value: true };
+  assert.ok(chosen, `sample for ${type.name}`);
   const fields = chosen.fields.map(field => ({ key: field.key, ...sample(field.type) }));
+  const record = Object.fromEntries(fields.map(field => [field.key, field.value]));
   return {
     expression: [chosen.name, ...fields.map(field => `(${field.expression})`)].join(' '),
-    value: fields.length ? Object.fromEntries(fields.map(field => [field.key, field.value])) : chosen.name,
+    value: family.kind === 'enum' ? chosen.name : family.kind === 'tagged' ? { tag: chosen.name, ...record } : record,
   };
 }
 
-for (const [family, constructors] of families) {
-  for (const constructor of constructors) {
-    test(`domain plan agrees with schema for ${constructor.name}`, () => {
-      const expected = sample(family, constructor);
-      assert.deepEqual(run(`def x : ${family} := ${expected.expression}`), {
-        'sample-lang': 1,
-        instances: [{ name: 'x', type: family, value: expected.value }],
-      });
+families.forEach(family => family.constructors.forEach(constructor => {
+  test(`domain plan agrees with schema for ${constructor.name}`, () => {
+    const expected = sample({ name: family.name }, family, constructor);
+    assert.deepEqual(run(`def x : ${family.name} := ${expected.expression}`), {
+      'sample-lang': 1,
+      instances: [{ name: 'x', type: family.name, value: expected.value }],
     });
-  }
-}
+  });
+}));
 
 test('domain constructors check every argument and the result family', () => {
   for (const source of [
@@ -51,9 +56,7 @@ test('domain constructors check every argument and the result family', () => {
 });
 
 test('domain family and constructor names are reserved', () => {
-  for (const [family, constructors] of families) {
-    for (const name of [family, ...constructors.map(constructor => constructor.name)]) {
-      reject(`def ${name} : Nat := 1`, 'reserved definition name', name);
-    }
-  }
+  families.forEach(family => [family.name, ...family.constructors.map(constructor => constructor.name)].forEach(name => {
+    reject(`def ${name} : Nat := 1`, 'reserved definition name', name);
+  }));
 });

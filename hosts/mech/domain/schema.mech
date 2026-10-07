@@ -1,6 +1,6 @@
 -- Sample domain: a small inventory. Replace this file with the design of
--- your language. It is the source of truth. domain/plans.mech must agree with
--- it, and test/domain.test.mjs checks that they agree.
+-- your language. It is the source of truth. Run make plans to generate
+-- domain/plans.mech from it (bin/gen-domain.mjs, domain/README.md).
 
 -- The key of the JSON header. Set it to the name of your language.
 def domainName : Text := textByte 115 (textByte 97 (textByte 109 (textByte 112 (textByte 108 (textByte 101 (textByte 45 (textByte 108 (textByte 97 (textByte 110 (textByte 103 (textEnd)))))))))))

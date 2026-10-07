@@ -2,13 +2,17 @@
 MECH_BIN ?= mech
 export MECH_BIN
 
-.PHONY: build check test
+.PHONY: build check plans test
 
 build:
 	node bin/build.mjs
 
 check:
+	node bin/gen-domain.mjs --check
 	node bin/build.mjs --check
+
+plans:
+	node bin/gen-domain.mjs
 
 test: build
 	@set -- test/*.test.mjs; test -f "$$1" || { echo "no compiler tests found" >&2; exit 1; }
