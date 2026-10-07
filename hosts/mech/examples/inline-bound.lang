@@ -1,0 +1,11 @@
+-- A partial application can bind an inline function.
+def Rule : Type 0 := (n : Nat) -> Nat
+def apply : (f : Rule) -> (n : Nat) -> Nat := fun (f : Rule) (n : Nat) => f n
+def use : (h : Rule) -> Nat := fun (h : Rule) => h 1
+def one : Nat := use (apply (fun (x : Nat) => x))
+-- The inline function sees the parameters around the partial application.
+def tag : (k : Nat) -> Nat := fun (k : Nat) => use (apply (fun (n : Nat) => k))
+def nine : Nat := tag 9
+-- Structure forms take such a partial application too.
+def xs : List Nat := cons 4 (cons 7 nil)
+def twos : List Nat := map (apply (fun (x : Nat) => 2)) xs

@@ -1,0 +1,17 @@
+-- The five functions of a fold over Value can bind their leading parameters.
+def Picker : Type 0 := (k : Nat) -> (n : Nat) -> Nat
+def pickK : Picker := fun (k : Nat) (n : Nat) => k
+def pickN : Picker := fun (k : Nat) (n : Nat) => n
+def onFlag : (b : Flag) -> Nat := fun (b : Flag) => 0
+def onText : (t : Text) -> Nat := fun (t : Text) => 0
+def onItems : (results : List Nat) -> Nat := fun (results : List Nat) => 0
+def attrsK : (k : Nat) -> (results : List (Prod Text Nat)) -> Nat := fun (k : Nat) (results : List (Prod Text Nat)) => k
+def leaf : Value := valueNat 9
+def record : Value := valueAttrs (attrsField "n" (valueNat 1) attrsEnd)
+def sevens : Nat := fold (pickK 7) onFlag onText onItems (attrsK 5) 0 leaf
+def nines : Nat := fold (pickN 7) onFlag onText onItems (attrsK 5) 0 leaf
+def fives : Nat := fold (pickK 7) onFlag onText onItems (attrsK 5) 0 record
+def choose : (k : Nat) -> Nat := fun (k : Nat) => fold (pickK k) onFlag onText onItems (attrsK 5) 0 leaf
+def chosen : Nat := choose 3
+def useK : (h : Picker) -> Nat := fun (h : Picker) => fold (h 5) onFlag onText onItems (attrsK 5) 0 leaf
+def picked : Nat := useK pickN

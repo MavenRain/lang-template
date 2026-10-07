@@ -1,0 +1,8 @@
+Compiler and generic test origin: ledger-lang 997fa7b
+Validation host HEAD: mechanism-lang 070a5a7946eafba6756eef7ba7102ebe6e5fe47e
+Validation host command: /Users/oobi/Documents/mechanism-lang/_build/default/bin/mech.exe
+Host checkout had 74 changed or untracked paths on 2026-10-07.
+The host HEAD alone does not reproduce this local binary.
+Node: v23.10.0
+Validation host binary SHA-256: 59849d0a0f036f538317cdbbf2a89e6b3ff9a2fc16610d3336abea029180f6dc
+Set MECH_BIN to a compatible mechanism-lang executable when building elsewhere.

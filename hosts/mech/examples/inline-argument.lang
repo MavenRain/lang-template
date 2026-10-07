@@ -1,0 +1,15 @@
+-- An inline function can be the argument of a function.
+def Rule : Type 0 := (n : Nat) -> Nat
+def apply : (f : Rule) -> (n : Nat) -> Nat := fun (f : Rule) (n : Nat) => f n
+def same : Nat := apply (fun (x : Nat) => x) 5
+-- The body sees the parameters around the application.
+def tag : (k : Nat) -> Nat := fun (k : Nat) => apply (fun (n : Nat) => k) 0
+def nine : Nat := tag 9
+-- The binders match the parameters of the expected function type.
+def Pick : Type 0 := (a : Nat) -> (b : Nat) -> Nat
+def both : (g : Pick) -> Nat := fun (g : Pick) => g 3 4
+def latter : Nat := both (fun (a : Nat) (b : Nat) => b)
+def xs : List Nat := cons 4 (cons 7 nil)
+def Spread : Type 0 := (n : Nat) -> List Nat
+def wrap : (f : Spread) -> List Nat := fun (f : Spread) => f 7
+def sevens : List Nat := wrap (fun (n : Nat) => map (fun (y : Nat) => n) xs)

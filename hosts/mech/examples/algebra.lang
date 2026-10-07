@@ -1,0 +1,40 @@
+-- Algebra and Filterable forms over sequences. fold consumes a source that
+-- synthesizes its type: Nat, Text, List A, Values or Attrs. unfold builds the
+-- declared carrier from a seed and stops at none or after n elements.
+def prepend : (n : Nat) -> (acc : List Nat) -> List Nat := fun (n : Nat) (acc : List Nat) => cons n acc
+def tick : (acc : List Text) -> List Text := fun (acc : List Text) => cons "tick" acc
+def swap : (s : Prod Nat Nat) -> Option (Prod Nat (Prod Nat Nat)) :=
+  fun (s : Prod Nat Nat) => some (pair (first s) (pair (second s) (first s)))
+def label : (s : Prod Text Text) -> Option (Prod (Prod Text Value) (Prod Text Text)) :=
+  fun (s : Prod Text Text) => some (pair (pair (first s) valueNull) (pair (second s) (first s)))
+def kept : (field : Prod Text Value) -> Flag := fun (field : Prod Text Value) => flagYes
+def dropped : (byte : Nat) -> Flag := fun (byte : Nat) => flagNo
+
+def counts : List Nat := cons 1 (cons 2 nil)
+def copied : List Nat := fold prepend nil counts
+def three : Nat := 3
+def ticks : List Text := fold tick nil three
+def greeting : Text := "Hi"
+def bytes : List Nat := fold prepend nil greeting
+def alternating : List Nat := unfold swap 4 (pair 1 2)
+def letters : Text := unfold swap 3 (pair 65 66)
+def fields : Attrs := unfold label 2 (pair "id" "name")
+def present : Attrs := filter kept fields
+def cleared : Text := filter dropped greeting
+
+-- Value is a carrier too. The coalgebra of unfold gives the layer of a seed:
+-- none for valueNull, or a number, a flag, a text, the seeds of the items, or
+-- the keys and seeds of the fields. unfold applies it at most n times. fold
+-- takes one function for each constructor after valueNull, then the result
+-- for valueNull.
+def grow : (s : Text) -> Option (Sum Nat (Sum Flag (Sum Text (Sum (List Text) (List (Prod Text Text)))))) :=
+  fun (s : Text) => some (inr (inr (inr (inr (cons (pair "left" s) (cons (pair "right" s) nil))))))
+def onNat : (n : Nat) -> Text := fun (n : Nat) => "number"
+def onFlag : (b : Flag) -> Text := fun (b : Flag) => "flag"
+def onText : (t : Text) -> Text := fun (t : Text) => t
+def onItems : (results : List Text) -> Text := fun (results : List Text) => "items"
+def onAttrs : (results : List (Prod Text Text)) -> Text := fun (results : List (Prod Text Text)) => "attrs"
+def valueTree : Value := unfold grow 2 "seed"
+def treeShape : Text := fold onNat onFlag onText onItems onAttrs "null" valueTree
+def plainLeaf : Value := valueText "plain"
+def leafText : Text := fold onNat onFlag onText onItems onAttrs "null" plainLeaf

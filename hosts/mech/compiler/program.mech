@@ -1,0 +1,440 @@
+def fuel16 : Fuel := fuelAppend fuelTen (fuelMore (fuelMore (fuelMore (fuelMore (fuelMore (fuelMore fuelEnd))))))
+def fuel32 : Fuel := fuelAppend fuel16 fuel16
+def fuel64 : Fuel := fuelAppend fuel32 fuel32
+def fuel128 : Fuel := fuelAppend fuel64 fuel64
+-- Derive checking fuel from source bytes and cap the depth at 512 steps.
+def rec depthFuelFrom : Nat -> Fuel -> Text -> Fuel :=
+  fun (count : Nat) (done : Fuel) (source : Text) =>
+  case source as self in Text return Fuel with
+  | textEnd => select Fuel (numberLt count 512) (fuelMore done) done
+  | textByte byte rest => (
+      case (natLt count 512) as bounded return Fuel with
+      | 0 (x : prod ()) => done
+      | 1 (x : prod ()) => depthFuelFrom (natAdd count 1) (fuelMore done) rest)
+
+def rec outputFuelFrom : Fuel -> Text -> Fuel := fun (done : Fuel) (source : Text) =>
+  case source as self in Text return Fuel with
+  | textEnd => fuelAppend done fuel128
+  | textByte byte rest => outputFuelFrom (fuelAppend done fuel32) rest
+
+-- The work budget is 8 function bodies for each source byte, plus 64. The
+-- count starts at 65 because the budget 0 is the error.
+def rec workBudgetFrom : Nat -> Text -> Nat := fun (done : Nat) (source : Text) =>
+  case source as self in Text return Nat with
+  | textEnd => done
+  | textByte byte rest => workBudgetFrom (natAdd done 8) rest
+
+-- A checked instance keeps the source byte of its definition for print errors.
+mu Located : Type 0 with
+| located : Nat -> Value -> Located
+
+-- An equality type keeps the canonical JSON text of its two sides.
+def eqType : Nat -> Fuel -> LType -> Value -> Value -> List Token -> Parsed LType :=
+  fun (position : Nat) (fuel : Fuel) (a : LType) (lhs : Value) (rhs : Value) (tokens : List Token) =>
+  case (printValue fuel textEnd 0 lhs) as left in Printed return Parsed LType with
+  | printError at message => parseError position message
+  | printed leftFuel leftText => (
+      case (printValue fuel textEnd 0 rhs) as right in Printed return Parsed LType with
+      | printError at message => parseError position message
+      | printed rightFuel rightText => parsed (tyEq a (reverseText leftText) (reverseText rightText)) tokens)
+
+-- `Eq A x y` is only the type of a definition. A is an atom that is a data
+-- type, and the sides x and y are atoms of type A.
+def parseEqType : Nat -> Fuel -> Nat -> List Binding -> List Token -> Worked LType :=
+  fun (position : Nat) (fuel : Fuel) (budget : Nat) (environment : List Binding) (tokens : List Token) =>
+  case (parseType fuel 1 environment tokens) as carrier in Parsed return Worked LType with
+  | parseError at message => workError at message
+  | parsed a afterType => (
+    case (natEq (typeLevel a) 0) as data return Worked LType with
+    | 0 (x : prod ()) => workError (firstPosition tokens) eData
+    | 1 (x : prod ()) => (
+      case (parseTerm fuel budget 1 a environment afterType) as left in Worked return Worked LType with
+      | workError at message => workError at message
+      | worked lhs afterLeft budget => (
+        case (parseTerm fuel budget 1 a environment afterLeft) as right in Worked return Worked LType with
+        | workError at message => workError at message
+        | worked rhs afterRight budget => liftParsed LType budget (eqType position fuel a lhs rhs afterRight))))
+
+def declaredType : Fuel -> Nat -> List Binding -> List Token -> Worked LType :=
+  fun (fuel : Fuel) (budget : Nat) (environment : List Binding) (tokens : List Token) =>
+  case tokens as self in List return Worked LType with
+  | nil => liftParsed LType budget (parseType fuel 0 environment tokens)
+  | cons head tail => (
+      case head as token in Token return Worked LType with
+      | numberToken position number => liftParsed LType budget (parseType fuel 0 environment tokens)
+      | stringToken position text => liftParsed LType budget (parseType fuel 0 environment tokens)
+      | punctuation position mark => liftParsed LType budget (parseType fuel 0 environment tokens)
+      | identifier position name => (
+          case (natEq (sameText name sEq) 1) as equality return Worked LType with
+          | 1 (x : prod ()) => parseEqType position fuel budget environment tail
+          | 0 (x : prod ()) => liftParsed LType budget (parseType fuel 0 environment tokens)))
+
+def dropToken : List Token -> List Token := fun (tokens : List Token) =>
+  case tokens as self in List return List Token with
+  | nil => nil
+  | cons head tail => tail
+
+-- The mark of a first punctuation token, else 1. No punctuation has mark 1.
+def markOf : List Token -> Nat := fun (tokens : List Token) =>
+  case tokens as self in List return Nat with
+  | nil => 1
+  | cons head tail => (
+      case head as token in Token return Nat with
+      | punctuation position mark => mark
+      | identifier position name => 1
+      | numberToken position number => 1
+      | stringToken position text => 1)
+
+def nameOf : List Token -> Option Text := fun (tokens : List Token) =>
+  case tokens as self in List return Option Text with
+  | nil => none
+  | cons head tail => (
+      case head as token in Token return Option Text with
+      | identifier position name => some name
+      | punctuation position mark => none
+      | numberToken position number => none
+      | stringToken position text => none)
+
+def isWord : Text -> List Token -> Nat := fun (word : Text) (tokens : List Token) =>
+  case (nameOf tokens) as found in Option return Nat with
+  | none => 0
+  | some name => sameText name word
+
+-- A parameter group `(x : A)` starts with an opening parenthesis, a name
+-- and a colon. A type never contains a colon. The type of a parameter is a
+-- data type, or `Type 0` for a type parameter.
+def startsParam : List Token -> Nat := fun (tokens : List Token) =>
+  boolAnd (numberEq (markOf tokens) 40) (boolAnd (numberEq (markOf (dropToken tokens)) 1)
+    (numberEq (markOf (dropToken (dropToken tokens))) 58))
+
+mu Signature : Type 0 with
+| signature : List Param -> LType -> Signature
+
+-- A type definition can name a function type. A parameter hides this name.
+def namedSignature : List Binding -> List Token -> Option Signature :=
+  fun (environment : List Binding) (tokens : List Token) =>
+  case (nameOf tokens) as named in Option return Option Signature with
+  | none => none
+  | some name => (
+      case (lookup name environment) as found in Option return Option Signature with
+      | none => none
+      | some item => (
+          case item as known in Binding return Option Signature with
+          | binding other ty value => none
+          | typeBinding other universe defined => none
+          | arrowBinding other params result => some (signature params result)
+          | funBinding other params result body => none
+          | closureBinding other params result body scope => none))
+
+-- The type of a parameter can also be the name of a function type that has
+-- no type parameter. The argument of this parameter is a function.
+def rec parameterType : Fuel -> List Binding -> List Token -> Parsed LType :=
+  fun (fuel : Fuel) (environment : List Binding) (tokens : List Token) =>
+  case fuel as guard in Fuel return Parsed LType with
+  | fuelEnd => parseError (firstPosition tokens) eFuel
+  | fuelMore more => (
+      case (natEq (markOf tokens) 40) as grouped return Parsed LType with
+      | 1 (x : prod ()) => (
+          case (parameterType more environment (dropToken tokens)) as inside in Parsed return Parsed LType with
+          | parseError at message => parseError at message
+          | parsed ty rest => closeParsed LType ty rest)
+      | 0 (x : prod ()) => (
+          case (namedSignature environment tokens) as arrow in Option return Parsed LType with
+          | some found => (
+              case found as self in Signature return Parsed LType with
+              | signature params result => select (Parsed LType) (hasTypeParam params)
+                  (parseError (firstPosition tokens) eData)
+                  (parsed (arrowType params result) (dropToken tokens)))
+          | none => parseType fuel 0 environment tokens))
+
+def parseParam : Fuel -> List Binding -> List Token -> Parsed Param :=
+  fun (fuel : Fuel) (environment : List Binding) (tokens : List Token) =>
+  case (nameOf (dropToken tokens)) as named in Option return Parsed Param with
+  | none => parseError (firstPosition tokens) eFun
+  | some name => (
+      case (parameterType fuel environment (dropToken (dropToken (dropToken tokens)))) as declared in Parsed return Parsed Param with
+      | parseError at message => parseError at message
+      | parsed ty rest => (
+          case (natEq (boolOr (isArrowType ty) (boolOr (numberEq (typeLevel ty) 0) (sameType ty (tyUniverse 0)))) 1) as allowed return Parsed Param with
+          | 0 (x : prod ()) => parseError (firstPosition (dropToken (dropToken (dropToken tokens)))) eData
+          | 1 (x : prod ()) => closeParsed Param (param name ty) rest))
+
+-- A function type starts with a parameter group or is the name of one.
+-- Grouping parentheses preserve this distinction from data types.
+def rec startsArrow : Fuel -> List Binding -> List Token -> Nat :=
+  fun (fuel : Fuel) (environment : List Binding) (tokens : List Token) =>
+  case fuel as guard in Fuel return Nat with
+  | fuelEnd => 0
+  | fuelMore more => (
+      case (namedSignature environment tokens) as known in Option return Nat with
+      | some found => 1
+      | none => (
+          case (natEq (startsParam tokens) 1) as parameter return Nat with
+          | 1 (x : prod ()) => 1
+          | 0 (x : prod ()) => (
+              case (natEq (markOf tokens) 40) as grouped return Nat with
+              | 0 (x : prod ()) => 0
+              | 1 (x : prod ()) => startsArrow more environment (dropToken tokens))))
+
+def reservedParam : Param -> Nat := fun (item : Param) =>
+  case item as self in Param return Nat with
+  | param name ty => reservedName name
+
+-- `(x : A) -> ... -> B` with data types. B cannot refer to a value parameter.
+-- A type parameter `(A : Type 0)` comes before each value parameter, and the
+-- later types and B can refer to it. Its name is not a reserved name.
+-- Parameters hide outer names in subsequent type annotations.
+-- The name of a function type can end the chain. Its parameters follow the
+-- earlier ones.
+def rec parseSignature : Fuel -> List Binding -> List Param -> List Token -> Parsed Signature :=
+  fun (fuel : Fuel) (environment : List Binding) (done : List Param) (tokens : List Token) =>
+  case fuel as guard in Fuel return Parsed Signature with
+  | fuelEnd => parseError (firstPosition tokens) eFuel
+  | fuelMore more => (
+    case (natEq (startsParam tokens) 1) as grouped return Parsed Signature with
+    | 0 (x : prod ()) => (
+      case (natEq (markOf tokens) 40) as opening return Parsed Signature with
+      | 1 (x : prod ()) => (
+          case (parseSignature more environment done (dropToken tokens)) as inside in Parsed return Parsed Signature with
+          | parseError at message => parseError at message
+          | parsed found rest => closeParsed Signature found rest)
+      | 0 (x : prod ()) => (
+      case (namedSignature environment tokens) as known in Option return Parsed Signature with
+      | none => (
+        case (parseType more 0 environment tokens) as declared in Parsed return Parsed Signature with
+        | parseError at message => parseError at message
+        | parsed result rest => select (Parsed Signature) (numberEq (typeLevel result) 0)
+            (parsed (signature (reverseListOnto Param nil done) result) rest)
+            (parseError (firstPosition tokens) eData))
+      | some found => (
+        case found as shape in Signature return Parsed Signature with
+        | signature params result => select (Parsed Signature) (boolAnd (hasValueParam done) (hasTypeParam params))
+            (parseError (firstPosition tokens) eTypeParam)
+            (parsed (signature (reverseListOnto Param params done) result) (dropToken tokens)))))
+    | 1 (x : prod ()) => (
+        case (parseParam more environment tokens) as first in Parsed return Parsed Signature with
+        | parseError at message => parseError at message
+        | parsed item rest => (
+          case (natEq (boolAnd (isTypeParam item) (reservedParam item)) 1) as reserved return Parsed Signature with
+          | 1 (x : prod ()) => parseError (firstPosition (dropToken tokens)) eReserved
+          | 0 (x : prod ()) => (
+            case (natEq (boolAnd (isTypeParam item) (hasValueParam done)) 1) as late return Parsed Signature with
+            | 1 (x : prod ()) => parseError (firstPosition (dropToken tokens)) eTypeParam
+            | 0 (x : prod ()) => (
+              case (natEq (markOf rest) 62) as arrow return Parsed Signature with
+              | 0 (x : prod ()) => parseError (firstPosition rest) eDef
+              | 1 (x : prod ()) => parseSignature more
+                  (bindParams (cons item nil) nil environment) (cons item done) (dropToken rest))))))
+
+def paramNamed : Text -> List Param -> Nat := fun (name : Text) (params : List Param) =>
+  case (lookup name (bindParams params nil nil)) as found in Option return Nat with
+  | none => 0
+  | some item => 1
+
+def paramType : Param -> LType := fun (item : Param) =>
+  case item as self in Param return LType with
+  | param name ty => ty
+
+-- A binder can give a new name to a type parameter. The list keeps the
+-- opaque type of the binder for each declared type parameter.
+def renameParam : Param -> Text -> List Binding -> List Binding :=
+  fun (declared : Param) (name : Text) (renames : List Binding) =>
+  case declared as self in Param return List Binding with
+  | param other ty => select (List Binding) (sameType ty (tyUniverse 0))
+      (cons (typeBinding other ty (tyNamed name)) renames) renames
+
+def rec paramRenames : List Param -> List Param -> List Binding -> List Binding :=
+  fun (declared : List Param) (binders : List Param) (renames : List Binding) =>
+  case declared as self in List return List Binding with
+  | nil => renames
+  | cons head tail => (
+      case binders as others in List return List Binding with
+      | nil => renames
+      | cons binder rest => (
+          case binder as named in Param return List Binding with
+          | param name ty => paramRenames tail rest (renameParam head name renames)))
+
+-- `fun (x : A) (y : B) => t` or `fun (x : A) => fun (y : B) => t`. The
+-- binder types are the declared ones, with the binder names of the earlier
+-- type parameters. The result is the body's tokens.
+-- Earlier binders are in scope when checking later annotations.
+def rec parseBinders : Fuel -> List Binding -> List Binding -> List Param -> List Param -> List Token -> Parsed (List Param) :=
+  fun (fuel : Fuel) (environment : List Binding) (renames : List Binding) (declared : List Param) (done : List Param) (tokens : List Token) =>
+  case fuel as guard in Fuel return Parsed (List Param) with
+  | fuelEnd => parseError (firstPosition tokens) eFuel
+  | fuelMore more => (
+    case declared as self in List return Parsed (List Param) with
+    | nil => select (Parsed (List Param)) (numberEq (markOf tokens) 63)
+        (parsed (reverseListOnto Param nil done) (dropToken tokens)) (parseError (firstPosition tokens) eFun)
+    | cons expected others => (
+        case (natEq (boolAnd (numberEq (markOf tokens) 63) (isWord sfun (dropToken tokens))) 1) as curried return Parsed (List Param) with
+        | 1 (x : prod ()) => (
+            case done as previous in List return Parsed (List Param) with
+            | nil => parseError (firstPosition tokens) eFun
+            | cons head tail => select (Parsed (List Param)) (startsParam (dropToken (dropToken tokens)))
+                (parseBinders more environment renames declared done (dropToken (dropToken tokens)))
+                (parseError (firstPosition (dropToken (dropToken tokens))) eFun))
+        | 0 (x : prod ()) => (
+          case (natEq (startsParam tokens) 1) as grouped return Parsed (List Param) with
+          | 0 (x : prod ()) => parseError (firstPosition tokens) eFun
+          | 1 (x : prod ()) => (
+            case (parseParam more environment tokens) as binder in Parsed return Parsed (List Param) with
+            | parseError at message => parseError at message
+            | parsed item rest => (
+              case item as named in Param return Parsed (List Param) with
+              | param name ty => (
+                case (natEq (reservedName name) 1) as reserved return Parsed (List Param) with
+                | 1 (x : prod ()) => parseError (firstPosition (dropToken tokens)) eReserved
+                | 0 (x : prod ()) => (
+                  case (natEq (paramNamed name done) 1) as repeated return Parsed (List Param) with
+                  | 1 (x : prod ()) => parseError (firstPosition (dropToken tokens)) eDuplicate
+                  | 0 (x : prod ()) => select (Parsed (List Param)) (sameType (substType renames (paramType expected)) ty)
+                      (parseBinders more (bindParams (cons item nil) nil environment) (renameParam expected name renames) others (cons item done) rest)
+                      (parseError (firstPosition tokens) eFun))))))))
+
+-- A function definition checks its body once. It is not an instance.
+def parseFunction : Fuel -> Nat -> Text -> List Binding -> List Token -> Parsed Binding :=
+  fun (fuel : Fuel) (budget : Nat) (name : Text) (environment : List Binding) (tokens : List Token) =>
+  case (parseSignature fuel environment nil tokens) as declared in Parsed return Parsed Binding with
+  | parseError at message => parseError at message
+  | parsed found afterType => (
+    case found as shape in Signature return Parsed Binding with
+    | signature params result => (
+      case (expectMark 61 afterType) as assign in Parsed return Parsed Binding with
+      | parseError at message => parseError at message
+      | parsed ignored afterAssign => (
+        case (natEq (isWord sfun afterAssign) 1) as opening return Parsed Binding with
+        | 0 (x : prod ()) => parseError (firstPosition afterAssign) eFun
+        | 1 (x : prod ()) => (
+          case (parseBinders fuel environment nil params nil (dropToken afterAssign)) as bound in Parsed return Parsed Binding with
+          | parseError at message => parseError at message
+          | parsed binders body => (
+            case (parseTerm fuel budget 0 (substType (paramRenames params binders nil) result) (cons checkMarker (bindParams binders nil environment)) body) as checked in Worked return Parsed Binding with
+            | workError at message => parseError at message
+            | worked value after left => parsed (funBinding name binders (substType (paramRenames params binders nil) result) body) after)))))
+
+def parseDefinition : Fuel -> Nat -> List Binding -> List Token -> Worked Binding :=
+  fun (fuel : Fuel) (budget : Nat) (environment : List Binding) (tokens : List Token) =>
+  case tokens as self in List return Worked Binding with
+  | nil => workError 0 eDef
+  | cons head tail => (
+    case head as nameToken in Token return Worked Binding with
+    | numberToken position number => workError position eDef
+    | stringToken position text => workError position eDef
+    | punctuation position mark => workError position eDef
+    | identifier position name => (
+      case (natEq (reservedName name) 1) as reserved return Worked Binding with
+      | 1 (x : prod ()) => workError position eReserved
+      | 0 (x : prod ()) => (
+        case (lookup name environment) as previous in Option return Worked Binding with
+        | some item => workError position eDuplicate
+        | none => (
+          case (expectMark 58 tail) as colon in Parsed return Worked Binding with
+          | parseError at message => workError at message
+          | parsed ignored rest => (
+            case (natEq (startsArrow fuel environment rest) 1) as signed return Worked Binding with
+            | 1 (x : prod ()) => liftParsed Binding budget (parseFunction fuel budget name environment rest)
+            | 0 (x : prod ()) => (
+            case (declaredType fuel budget environment rest) as declared in Worked return Worked Binding with
+            | workError at message => workError at message
+            | worked ty afterType budget => (
+              case (expectMark 61 afterType) as assign in Parsed return Worked Binding with
+              | parseError at message => workError at message
+              | parsed ignored afterAssign => (
+                case (natEq (isTermType ty) 1) as data return Worked Binding with
+                | 1 (x : prod ()) => (
+                    case (parseTerm fuel budget 0 ty environment afterAssign) as checked in Worked return Worked Binding with
+                    | workError at message => workError at message
+                    | worked value after budget => worked (binding name ty value) after budget)
+                | 0 (x : prod ()) => (
+                  case (natEq (startsArrow fuel environment afterAssign) 1) as arrow return Worked Binding with
+                  | 1 (x : prod ()) => (
+                    case (parseSignature fuel environment nil afterAssign) as defined in Parsed return Worked Binding with
+                    | parseError at message => workError at message
+                    | parsed found after => (
+                      case found as shape in Signature return Worked Binding with
+                      | signature params result => select (Worked Binding) (numberEq (typeLevel ty) (natAdd 1 (hasTypeParam params)))
+                          (worked (arrowBinding name params result) after budget) (workError (firstPosition afterAssign) eUniverse)))
+                  | 0 (x : prod ()) => (
+                    case (parseType fuel 0 environment afterAssign) as defined in Parsed return Worked Binding with
+                    | parseError at message => workError at message
+                    | parsed inner after => select (Worked Binding) (numberEq (typeLevel ty) (natAdd (typeLevel inner) 1))
+                        (worked (typeBinding name ty inner) after budget) (workError (firstPosition afterAssign) eUniverse)))))))))))
+
+def instanceValue : Text -> LType -> Value -> Value := fun (name : Text) (ty : LType) (value : Value) =>
+  valueAttrs (attrsField kName (valueText name)
+    (attrsField kType (valueText (typeName ty)) (attrsField kValue value attrsEnd)))
+
+-- Type definitions, names of function types and proofs are
+-- not instances, so the output omits them.
+def recordInstance : Nat -> Binding -> List Located -> List Located :=
+  fun (position : Nat) (item : Binding) (done : List Located) =>
+  case item as self in Binding return List Located with
+  | binding name ty value => (
+          case (sidesOf ty) as proof in EqSides return List Located with
+          | notEq => cons (located position (instanceValue name ty value)) done
+          | eqSides a lhs rhs => done)
+  | typeBinding name universe defined => done
+  | arrowBinding name params result => done
+  | funBinding name params result body => done
+  | closureBinding name params result body scope => done
+
+def rec parseProgram : Fuel -> Nat -> Fuel -> List Binding -> List Located -> List Token -> Result (List Located) :=
+  fun (fuel : Fuel) (budget : Nat) (checkingFuel : Fuel) (environment : List Binding) (done : List Located) (tokens : List Token) =>
+  case fuel as guard in Fuel return Result (List Located) with
+  | fuelEnd => failure (firstPosition tokens) eFuel
+  | fuelMore more => (
+    case tokens as self in List return Result (List Located) with
+    | nil => failure 0 eDef
+    | cons head tail => (
+      case head as token in Token return Result (List Located) with
+      | numberToken position number => failure position eDef
+      | stringToken position text => failure position eDef
+      | punctuation position mark => select (Result (List Located)) (numberEq mark 0)
+          (success (reverseListOnto Located nil done)) (failure position eDef)
+      | identifier position word => (
+          case (natEq (sameText word sdef) 1) as definition return Result (List Located) with
+          | 0 (x : prod ()) => failure position eDef
+          | 1 (x : prod ()) => (
+              case (parseDefinition checkingFuel budget environment tail) as next in Worked return Result (List Located) with
+              | workError at message => failure at message
+              | worked item rest left => parseProgram more left checkingFuel (cons item environment)
+                  (recordInstance position item done) rest))))
+
+-- A print error reports the first byte of the definition being printed.
+def rec printInstances : Fuel -> Text -> Nat -> List Located -> Printed :=
+  fun (fuel : Fuel) (done : Text) (first : Nat) (instances : List Located) =>
+  case instances as self in List return Printed with
+  | nil => emitText fuel done jEnd
+  | cons head rest => (
+      case head as item in Located return Printed with
+      | located position value => (
+          case (emitText fuel done (separator first)) as comma in Printed return Printed with
+          | printError at message => printError position message
+          | printed more output => (
+              case (printValue more output 0 value) as instance in Printed return Printed with
+              | printError at message => printError position message
+              | printed remaining next => printInstances remaining next 0 rest)))
+
+def errorText : Nat -> Text -> Text := fun (position : Nat) (message : Text) =>
+  case (quoteBytes (fuelFor message) (textByte 34 textEnd) message) as quoted in Printed return Text with
+  | printError at ignored => jNull
+  | printed remaining reversed => appendText jError (appendText (numberText position)
+      (appendText jMessage (appendText (reverseText reversed) jErrorEnd)))
+
+def compile : Text -> Text := fun (source : Text) =>
+  case (utf8Error source) as invalid in Option return Text with
+  | some position => errorText position eUtf8
+  | none => (
+      case (lex (fuelFor source) source) as tokens in Result return Text with
+      | failure at message => errorText at message
+      | success tokens => (
+          case (parseProgram (fuelFor source) (workBudgetFrom 65 source) (depthFuelFrom 0 fuelEnd source) nil nil tokens) as program in Result return Text with
+          | failure at message => errorText at message
+          | success instances => (
+              case (printHeader (outputFuelFrom fuelEnd source)) as header in Printed return Text with
+              | printError at message => errorText at message
+              | printed fuel output => (
+                  case (printInstances fuel output 1 instances) as document in Printed return Text with
+                  | printError at message => errorText at message
+                  | printed remaining reversed => reverseText reversed))))

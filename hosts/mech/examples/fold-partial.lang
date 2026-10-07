@@ -1,0 +1,11 @@
+-- fold can bind the leading parameters of its function.
+def Three : Type 0 := (k : Nat) -> (x : Nat) -> (acc : Nat) -> Nat
+def pick3 : Three := fun (k : Nat) (x : Nat) (acc : Nat) => k
+def consK : (k : Nat) -> (x : Nat) -> (acc : List Nat) -> List Nat := fun (k : Nat) (x : Nat) (acc : List Nat) => cons k acc
+def xs : List Nat := cons 4 (cons 7 nil)
+def nines : Nat := fold (pick3 9) 0 xs
+def ones : List Nat := fold (consK 1) nil xs
+def choose : (k : Nat) -> Nat := fun (k : Nat) => fold (pick3 k) 0 xs
+def chosen : Nat := choose 3
+def useThree : (h : Three) -> Nat := fun (h : Three) => fold (h 5) 0 xs
+def fives : Nat := useThree pick3

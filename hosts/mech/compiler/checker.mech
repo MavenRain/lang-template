@@ -1,0 +1,1941 @@
+def projectionIndex : Text -> Nat := fun (name : Text) =>
+  select Nat (sameText name sfirst) 1 (select Nat (sameText name ssecond) 2 0)
+
+-- A checked product value is the object with the fields first and second.
+def projectValue : Nat -> Value -> Value := fun (index : Nat) (value : Value) =>
+  case value as self in Value return Value with
+  | valueNull => valueNull
+  | valueFlag flag => valueNull
+  | valueNat number => valueNull
+  | valueText text => valueNull
+  | valueItems items => valueNull
+  | valueAttrs attrs => (
+      case attrs as fields in Attrs return Value with
+      | attrsEnd => valueNull
+      | attrsField key item rest => select Value (numberEq index 1) item (
+          case rest as others in Attrs return Value with
+          | attrsEnd => valueNull
+          | attrsField other next more => next))
+
+def project : Nat -> Nat -> Typed -> List Token -> Parsed Typed :=
+  fun (position : Nat) (index : Nat) (found : Typed) (tokens : List Token) =>
+  case found as self in Typed return Parsed Typed with
+  | typed ty value => (
+      case ty as product in LType return Parsed Typed with
+      | tyNat => parseError position eProduct
+      | tyText => parseError position eProduct
+      | tyFlag => parseError position eProduct
+      | tyValue => parseError position eProduct
+      | tyValues => parseError position eProduct
+      | tyAttrs => parseError position eProduct
+      | tyNamed name => parseError position eProduct
+      | tyOption a => parseError position eProduct
+      | tyList a => parseError position eProduct
+      | tyProd a b => parsed (select Typed (numberEq index 1)
+          (typed a (projectValue 1 value)) (typed b (projectValue 2 value))) tokens
+      | tySum a b => parseError position eProduct
+      | tyUniverse level => parseError position eProduct
+      | tyEq a x y => parseError position eProduct
+      | tyArrow a b => parseError position eProduct)
+
+def checkSynthesized : Nat -> LType -> Parsed Typed -> Parsed Value :=
+  fun (position : Nat) (expected : LType) (result : Parsed Typed) =>
+  case result as self in Parsed return Parsed Value with
+  | parseError at message => parseError at message
+  | parsed found rest => (
+      case found as item in Typed return Parsed Value with
+      | typed ty value => select (Parsed Value) (sameType expected ty)
+          (parsed value rest) (parseError position eTerm))
+
+-- Forms that synthesize a type from one argument: 1 first, 2 second,
+-- 3 symm. The form 4 trans takes two arguments, and 5 either takes three.
+def synthForm : Text -> Nat := fun (name : Text) =>
+  select Nat (sameText name seither) 5 (select Nat (sameText name ssymm) 3
+    (select Nat (sameText name strans) 4 (projectionIndex name)))
+
+-- Forms that check against a declared structure type: 1 pure, 2 map,
+-- 3 bind, 4 filter, 5 fold, 6 unfold.
+def structureForm : Text -> Nat := fun (name : Text) =>
+  select Nat (sameText name spure) 1 (select Nat (sameText name smap) 2
+    (select Nat (sameText name sbind) 3 (select Nat (sameText name sfilter) 4
+      (select Nat (sameText name sfold) 5 (select Nat (sameText name sunfold) 6 0)))))
+
+-- An equality type keeps its sides as canonical JSON text.
+mu EqSides : Type 0 with
+| eqSides : LType -> Text -> Text -> EqSides
+| notEq : EqSides
+
+def sidesOf : LType -> EqSides := fun (ty : LType) =>
+  case ty as self in LType return EqSides with
+  | tyNat => notEq
+  | tyText => notEq
+  | tyFlag => notEq
+  | tyValue => notEq
+  | tyValues => notEq
+  | tyAttrs => notEq
+  | tyNamed name => notEq
+  | tyOption a => notEq
+  | tyList a => notEq
+  | tyProd a b => notEq
+  | tySum a b => notEq
+  | tyUniverse level => notEq
+  | tyEq a x y => eqSides a x y
+  | tyArrow a b => notEq
+
+-- A proof has no runtime content. Its value is null.
+def reflCheck : Nat -> LType -> List Token -> Parsed Value :=
+  fun (position : Nat) (expected : LType) (tokens : List Token) =>
+  case (sidesOf expected) as self in EqSides return Parsed Value with
+  | notEq => parseError position eTerm
+  | eqSides a x y => select (Parsed Value) (sameText x y)
+      (parsed valueNull tokens) (parseError position eRefl)
+
+def symmProof : Nat -> Typed -> List Token -> Parsed Typed :=
+  fun (position : Nat) (found : Typed) (tokens : List Token) =>
+  case found as self in Typed return Parsed Typed with
+  | typed ty value => (
+      case (sidesOf ty) as sides in EqSides return Parsed Typed with
+      | notEq => parseError position eProof
+      | eqSides a x y => parsed (typed (tyEq a y x) valueNull) tokens)
+
+def transProof : Nat -> Typed -> Typed -> List Token -> Parsed Typed :=
+  fun (position : Nat) (left : Typed) (right : Typed) (tokens : List Token) =>
+  case left as self in Typed return Parsed Typed with
+  | typed leftType leftValue => (
+    case right as other in Typed return Parsed Typed with
+    | typed rightType rightValue => (
+      case (sidesOf leftType) as first in EqSides return Parsed Typed with
+      | notEq => parseError position eProof
+      | eqSides a x y => (
+          case (sidesOf rightType) as second in EqSides return Parsed Typed with
+          | notEq => parseError position eProof
+          | eqSides b u z => select (Parsed Typed) (boolAnd (sameType a b) (sameText y u))
+              (parsed (typed (tyEq a x z) valueNull) tokens) (parseError position eTrans))))
+
+-- The definition of a function checks its body once, with null for each
+-- parameter. An unnamed binding marks this check. Constructor evaluation
+-- errors wait for an application. An application in the body gives null, and
+-- so does a form that applies a function.
+def checkMarker : Binding := binding textEnd tyNat valueNull
+
+def checkingBody : List Binding -> Nat := fun (environment : List Binding) =>
+  case (lookup textEnd environment) as found in Option return Nat with
+  | none => 0
+  | some item => 1
+
+def rec paramTypes : List Param -> List LType := fun (params : List Param) =>
+  case params as self in List return List LType with
+  | nil => nil
+  | cons head tail => (
+      case head as item in Param return List LType with
+      | param name ty => cons ty (paramTypes tail))
+
+-- A type parameter has the type `Type 0`. bindParams gives it the opaque type
+-- of its name. No constructor makes a term of an opaque type, because the
+-- name of a type parameter is not a reserved name.
+def isTypeParam : Param -> Nat := fun (item : Param) =>
+  case item as self in Param return Nat with
+  | param name ty => sameType ty (tyUniverse 0)
+
+def rec hasTypeParam : List Param -> Nat := fun (params : List Param) =>
+  case params as self in List return Nat with
+  | nil => 0
+  | cons head tail => (
+      case (natEq (isTypeParam head) 1) as found return Nat with
+      | 1 (x : prod ()) => 1
+      | 0 (x : prod ()) => hasTypeParam tail)
+
+def rec hasValueParam : List Param -> Nat := fun (params : List Param) =>
+  case params as self in List return Nat with
+  | nil => 0
+  | cons head tail => (
+      case (natEq (isTypeParam head) 1) as found return Nat with
+      | 1 (x : prod ()) => hasValueParam tail
+      | 0 (x : prod ()) => 1)
+
+-- The type that a list of type bindings gives for the name of a type
+-- parameter. A name that the list does not hold stays opaque.
+def typeArgument : Text -> List Binding -> LType := fun (name : Text) (chosen : List Binding) =>
+  case (lookup name chosen) as found in Option return LType with
+  | none => tyNamed name
+  | some item => (
+      case item as known in Binding return LType with
+      | binding other ty value => tyNamed name
+      | typeBinding other universe defined => defined
+      | arrowBinding other params result => tyNamed name
+      | funBinding other params result body => tyNamed name
+      | closureBinding other params result body scope => tyNamed name)
+
+-- The substitution replaces all names in one step, so a type argument that
+-- contains the name of another type parameter does not change again.
+def rec substType : List Binding -> LType -> LType := fun (chosen : List Binding) (ty : LType) =>
+  case ty as self in LType return LType with
+  | tyNat => tyNat
+  | tyText => tyText
+  | tyFlag => tyFlag
+  | tyValue => tyValue
+  | tyValues => tyValues
+  | tyAttrs => tyAttrs
+  | tyNamed name => typeArgument name chosen
+  | tyOption a => tyOption (substType chosen a)
+  | tyList a => tyList (substType chosen a)
+  | tyProd a b => tyProd (substType chosen a) (substType chosen b)
+  | tySum a b => tySum (substType chosen a) (substType chosen b)
+  | tyUniverse level => tyUniverse level
+  | tyEq a x y => tyEq (substType chosen a) x y
+  | tyArrow a b => tyArrow (substType chosen a) (substType chosen b)
+
+-- The value parameters of a function, with the type arguments in place of
+-- the type parameters.
+def rec valueParams : List Binding -> List Param -> List Param :=
+  fun (chosen : List Binding) (params : List Param) =>
+  case params as self in List return List Param with
+  | nil => nil
+  | cons head tail => (
+      case head as item in Param return List Param with
+      | param name ty => (
+          case (natEq (isTypeParam head) 1) as found return List Param with
+          | 1 (x : prod ()) => valueParams chosen tail
+          | 0 (x : prod ()) => cons (param name (substType chosen ty)) (valueParams chosen tail)))
+
+-- An application gives one type argument for each type parameter. The type
+-- parameters come first. A type argument is a data type in the position of
+-- an argument.
+def rec typeArguments : Fuel -> List Param -> List Binding -> List Binding -> List Token -> Parsed (List Binding) :=
+  fun (fuel : Fuel) (params : List Param) (environment : List Binding) (chosen : List Binding) (tokens : List Token) =>
+  case params as self in List return Parsed (List Binding) with
+  | nil => parsed chosen tokens
+  | cons head tail => (
+      case head as item in Param return Parsed (List Binding) with
+      | param name ty => (
+          case (natEq (isTypeParam head) 1) as found return Parsed (List Binding) with
+          | 0 (x : prod ()) => parsed chosen tokens
+          | 1 (x : prod ()) => (
+              case (parseType fuel 1 environment tokens) as actual in Parsed return Parsed (List Binding) with
+              | parseError at message => parseError at message
+              | parsed given rest => (
+                  case (natEq (typeLevel given) 0) as data return Parsed (List Binding) with
+                  | 0 (x : prod ()) => parseError (firstPosition tokens) eData
+                  | 1 (x : prod ()) => typeArguments fuel tail environment (cons (typeBinding name ty given) chosen) rest))))
+
+-- The scope of a definition is the part of the environment that is older
+-- than the definition. A body evaluates in this scope, so the parameters of
+-- a caller cannot replace the names that the body uses.
+def rec definitionScope : Text -> List Binding -> List Binding :=
+  fun (name : Text) (environment : List Binding) =>
+  case environment as self in List return List Binding with
+  | nil => nil
+  | cons head tail => (
+      case (natEq (sameText name (bindingName head)) 1) as found return List Binding with
+      | 1 (x : prod ()) => tail
+      | 0 (x : prod ()) => definitionScope name tail)
+
+-- A parameter of a function type is a closure. The value of a function
+-- argument is the name of the function in the environment of the
+-- application. Without this name the closure has no body. This is the case
+-- in the check of a function body, which does not evaluate an application.
+def opaqueClosure : Text -> LType -> Binding := fun (name : Text) (ty : LType) =>
+  closureBinding name (arrowParams ty) (arrowResult ty) nil scopeEnd
+
+def closureOfName : Text -> LType -> Text -> List Binding -> Binding :=
+  fun (name : Text) (ty : LType) (target : Text) (caller : List Binding) =>
+  case (lookup target caller) as found in Option return Binding with
+  | none => opaqueClosure name ty
+  | some item => (
+      case item as known in Binding return Binding with
+      | binding other given held => opaqueClosure name ty
+      | typeBinding other universe defined => opaqueClosure name ty
+      | arrowBinding other params result => opaqueClosure name ty
+      | funBinding other params result body =>
+          closureBinding name params result body (scopeOf (definitionScope other caller))
+      | closureBinding other params result body scope =>
+          closureBinding name params result body scope)
+
+-- takeCount and dropCount split a list at the length of another list.
+def rec takeCount : (0 A : Type 0) -> (0 B : Type 0) -> List A -> List B -> List B :=
+  fun (0 A : Type 0) (0 B : Type 0) (counts : List A) (items : List B) =>
+  case counts as self in List return List B with
+  | nil => nil
+  | cons head tail => (
+      case items as rest in List return List B with
+      | nil => nil
+      | cons first others => cons first (takeCount A B tail others))
+
+def rec dropCount : (0 A : Type 0) -> (0 B : Type 0) -> List A -> List B -> List B :=
+  fun (0 A : Type 0) (0 B : Type 0) (counts : List A) (items : List B) =>
+  case counts as self in List return List B with
+  | nil => items
+  | cons head tail => (
+      case items as rest in List return List B with
+      | nil => nil
+      | cons first others => dropCount A B tail others)
+
+def rec listOfValues : Values -> List Value := fun (items : Values) =>
+  case items as self in Values return List Value with
+  | valuesEnd => nil
+  | valuesItem head rest => cons head (listOfValues rest)
+
+def rec valuesOfList : List Value -> Values := fun (items : List Value) =>
+  case items as self in List return Values with
+  | nil => valuesEnd
+  | cons head tail => valuesItem head (valuesOfList tail)
+
+-- An inline function argument is a value: the names of its binders, then
+-- the tokens of its body. A token is its kind, its position and its payload.
+-- The head of the value is not a text, so it is not a partial application.
+def inlineItem : Nat -> Nat -> Value -> Value := fun (kind : Nat) (position : Nat) (payload : Value) =>
+  valueItems (valuesItem (valueNat kind) (valuesItem (valueNat position) (valuesItem payload valuesEnd)))
+
+def inlineTokenValue : Token -> Value := fun (token : Token) =>
+  case token as self in Token return Value with
+  | identifier position name => inlineItem 0 position (valueText name)
+  | numberToken position number => inlineItem 1 position (valueNat number)
+  | stringToken position text => inlineItem 2 position (valueText text)
+  | punctuation position mark => inlineItem 3 position (valueNat mark)
+
+def rec inlineTokenValues : List Token -> Values := fun (tokens : List Token) =>
+  case tokens as self in List return Values with
+  | nil => valuesEnd
+  | cons head tail => valuesItem (inlineTokenValue head) (inlineTokenValues tail)
+
+def rec inlineNames : List Param -> Values := fun (params : List Param) =>
+  case params as self in List return Values with
+  | nil => valuesEnd
+  | cons head tail => (
+      case head as item in Param return Values with
+      | param name ty => valuesItem (valueText name) (inlineNames tail))
+
+def inlineValue : List Param -> List Token -> Value := fun (params : List Param) (body : List Token) =>
+  valueItems (valuesItem (valueItems (inlineNames params)) (inlineTokenValues body))
+
+def inlineNat : Value -> Nat := fun (value : Value) =>
+  case (asNat value) as number in Option return Nat with
+  | none => 0
+  | some given => given
+
+def inlineText : Value -> Text := fun (value : Value) =>
+  case (asText value) as named in Option return Text with
+  | none => textEnd
+  | some given => given
+
+def inlineToken : Nat -> Nat -> Value -> Token := fun (kind : Nat) (position : Nat) (payload : Value) =>
+  case (natEq kind 0) as named return Token with
+  | 1 (x : prod ()) => identifier position (inlineText payload)
+  | 0 (x : prod ()) => (
+    case (natEq kind 1) as counted return Token with
+    | 1 (x : prod ()) => numberToken position (inlineNat payload)
+    | 0 (x : prod ()) => (
+      case (natEq kind 2) as quoted return Token with
+      | 1 (x : prod ()) => stringToken position (inlineText payload)
+      | 0 (x : prod ()) => punctuation position (inlineNat payload)))
+
+def inlineParts : Value -> List Value := fun (value : Value) =>
+  case (asValues value) as items in Option return List Value with
+  | none => nil
+  | some parts => listOfValues parts
+
+def inlineTokenOf : List Value -> Token := fun (parts : List Value) =>
+  inlineToken (inlineNat (argumentHead parts)) (inlineNat (argumentHead (argumentTail parts)))
+    (argumentHead (argumentTail (argumentTail parts)))
+
+def rec inlineTokens : Values -> List Token := fun (items : Values) =>
+  case items as self in Values return List Token with
+  | valuesEnd => nil
+  | valuesItem head rest => cons (inlineTokenOf (inlineParts head)) (inlineTokens rest)
+
+-- The binders of an inline argument take the parameter types of the
+-- function type that the checker matched at the argument.
+def rec inlineParams : List Value -> List Param -> List Param :=
+  fun (names : List Value) (params : List Param) =>
+  case names as self in List return List Param with
+  | nil => nil
+  | cons head tail => (
+      case params as others in List return List Param with
+      | nil => nil
+      | cons first rest => (
+          case first as item in Param return List Param with
+          | param label ty => cons (param (inlineText head) ty) (inlineParams tail rest)))
+
+-- An inline argument keeps the scope of the application, where the checker
+-- checked it.
+def inlineClosure : Text -> LType -> Value -> Values -> List Binding -> Binding :=
+  fun (name : Text) (ty : LType) (names : Value) (body : Values) (caller : List Binding) =>
+  closureBinding name (inlineParams (inlineParts names) (arrowParams ty)) (arrowResult ty)
+    (inlineTokens body) (scopeOf caller)
+
+-- A partial application of a function with type parameters keeps the
+-- tokens of its type arguments as its first bound value. The closure parses
+-- them again in the scope of the application.
+def rec typeFuel : List Token -> Fuel := fun (tokens : List Token) =>
+  case tokens as self in List return Fuel with
+  | nil => fuelMore fuelEnd
+  | cons head tail => fuelMore (typeFuel tail)
+
+def typeTokensOf : Value -> List Token := fun (types : Value) =>
+  case (asValues types) as listed in Option return List Token with
+  | none => nil
+  | some items => inlineTokens items
+
+def typedBound : List Param -> List Token -> List Token -> List Value -> List Value :=
+  fun (params : List Param) (tokens : List Token) (rest : List Token) (values : List Value) =>
+  select (List Value) (hasTypeParam params)
+    (cons (valueItems (inlineTokenValues (takeCount Token Token (dropCount Token Token rest tokens) tokens))) values)
+    values
+
+-- A partial application `(g a1 .. ak)` binds the first k parameters of g in
+-- the scope of the closure. The value of a function argument, and of a bound
+-- argument of a function type, is a name, the name of a function followed by
+-- its bound arguments, or an inline function. Recursion follows the checked
+-- Value and Values trees, so every bound argument keeps its binding.
+def rec boundBinding : Value -> Text -> LType -> List Binding -> Binding :=
+  fun (value : Value) (name : Text) (ty : LType) (caller : List Binding) =>
+  case value as stored in Value return Binding with
+    | valueNull => opaqueClosure name ty
+    | valueFlag flag => opaqueClosure name ty
+    | valueNat number => opaqueClosure name ty
+    | valueText target => closureOfName name ty target caller
+    | valueAttrs attrs => opaqueClosure name ty
+    | valueItems items => (
+      case items as self in Values return Binding with
+      | valuesEnd => opaqueClosure name ty
+      | valuesItem head rest => (
+        case (asText head) as applied in Option return Binding with
+        | none => inlineClosure name ty head rest caller
+        | some target => (
+          case (lookup target caller) as found in Option return Binding with
+          | none => opaqueClosure name ty
+          | some item => (
+            case item as known in Binding return Binding with
+            | binding other given held => opaqueClosure name ty
+            | typeBinding other universe defined => opaqueClosure name ty
+            | arrowBinding other params result => opaqueClosure name ty
+            | funBinding other params result body => (
+                case (natEq (hasTypeParam params) 1) as polymorphic return Binding with
+                | 1 (x : prod ()) => typedClosure rest name ty other params result body caller
+                | 0 (x : prod ()) =>
+                    closureBinding name (dropCount Value Param (listOfValues rest) params) result body
+                      (scopeOf (bindBound rest params caller (definitionScope other caller))))
+            | closureBinding other params result body scope =>
+                closureBinding name (dropCount Value Param (listOfValues rest) params) result body
+                  (scopeOf (bindBound rest params caller (scopeList scope)))))))
+and bindBound : Values -> List Param -> List Binding -> List Binding -> List Binding :=
+  fun (values : Values) (params : List Param) (caller : List Binding) (scope : List Binding) =>
+  case values as stored in Values return List Binding with
+  | valuesEnd => scope
+  | valuesItem value rest => (
+    case params as self in List return List Binding with
+    | nil => scope
+    | cons head tail => (
+        case head as item in Param return List Binding with
+        | param bound ty => (
+            case (natEq (isArrowType ty) 1) as higher return List Binding with
+            | 0 (x : prod ()) => bindBound rest tail caller (cons (binding bound ty value) scope)
+            | 1 (x : prod ()) => bindBound rest tail caller
+                (cons (boundBinding value bound ty caller) scope))))
+-- The closure of a function with type parameters binds the type arguments
+-- in front of the definition scope, as an application does. The types of
+-- the value parameters and of the result use the type arguments.
+and typedClosure : Values -> Text -> LType -> Text -> List Param -> LType -> List Token -> List Binding -> Binding :=
+  fun (rest : Values) (name : Text) (ty : LType) (other : Text) (params : List Param) (result : LType) (body : List Token) (caller : List Binding) =>
+  case rest as stored in Values return Binding with
+  | valuesEnd => opaqueClosure name ty
+  | valuesItem types values => (
+    case (typeArguments (typeFuel (typeTokensOf types)) params caller nil (typeTokensOf types)) as instantiated in Parsed return Binding with
+    | parseError at message => opaqueClosure name ty
+    | parsed chosen after =>
+        closureBinding name (dropCount Value Param (listOfValues values) (valueParams chosen params)) (substType chosen result) body
+          (scopeOf (bindBound values (valueParams chosen params) caller
+            (reverseListOnto Binding (definitionScope other caller) chosen))))
+
+def partialClosure : Text -> LType -> Text -> List Value -> List Binding -> Binding :=
+  fun (name : Text) (ty : LType) (target : Text) (bound : List Value) (caller : List Binding) =>
+  boundBinding (valueItems (valuesItem (valueText target) (valuesOfList bound))) name ty caller
+
+def bindParam : Text -> LType -> Value -> List Binding -> Binding :=
+  fun (name : Text) (ty : LType) (value : Value) (caller : List Binding) =>
+  case (natEq (isArrowType ty) 1) as higher return Binding with
+  | 1 (x : prod ()) => boundBinding value name ty caller
+  | 0 (x : prod ()) => select Binding (sameType ty (tyUniverse 0)) (typeBinding name ty (tyNamed name))
+      (binding name ty value)
+
+-- bindArguments binds the parameters of an application. The caller is the
+-- environment of the application, which holds the function arguments.
+def rec bindArguments : List Binding -> List Param -> List Value -> List Binding -> List Binding :=
+  fun (caller : List Binding) (params : List Param) (values : List Value) (environment : List Binding) =>
+  case params as self in List return List Binding with
+  | nil => environment
+  | cons head tail => (
+      case head as item in Param return List Binding with
+      | param name ty => bindArguments caller tail (argumentTail values)
+          (cons (bindParam name ty (argumentHead values) caller) environment))
+
+def bindParams : List Param -> List Value -> List Binding -> List Binding :=
+  fun (params : List Param) (values : List Value) (environment : List Binding) =>
+  bindArguments nil params values environment
+
+-- boundFunctions is 1 when each bound argument of a function type is a name
+-- or a list: an inline function or a partial application.
+def rec boundFunctions : List Param -> List Value -> Nat :=
+  fun (params : List Param) (values : List Value) =>
+  case params as self in List return Nat with
+  | nil => 1
+  | cons head tail => (
+      case head as item in Param return Nat with
+      | param bound ty => (
+          case (natEq (isArrowType ty) 1) as higher return Nat with
+          | 0 (x : prod ()) => boundFunctions tail (argumentTail values)
+          | 1 (x : prod ()) => (
+              case (asText (argumentHead values)) as named in Option return Nat with
+              | none => (
+                  case (asValues (argumentHead values)) as listed in Option return Nat with
+                  | none => 0
+                  | some items => boundFunctions tail (argumentTail values))
+              | some target => boundFunctions tail (argumentTail values))))
+
+-- boundParams gives the parameters of a function that a partial application
+-- binds: all but the last ones, as many as the expected function type has.
+-- The front parameters of a function are all but the last one.
+-- closesNext is 1 when the next token is a closing parenthesis.
+def closesNext : List Token -> Nat := fun (tokens : List Token) =>
+  case tokens as self in List return Nat with
+  | nil => 0
+  | cons head tail => (
+      case head as token in Token return Nat with
+      | numberToken position number => 0
+      | stringToken position text => 0
+      | identifier position name => 0
+      | punctuation position mark => numberEq mark 41)
+
+def frontParams : List Param -> List Param := fun (params : List Param) =>
+  case params as self in List return List Param with
+  | nil => nil
+  | cons head tail => takeCount Param Param tail params
+
+def boundParams : List Param -> List Param -> List Param :=
+  fun (params : List Param) (expected : List Param) =>
+  reverseListOnto Param nil (dropCount Param Param expected (reverseListOnto Param nil params))
+
+-- A function argument of a structure form names a function with one
+-- parameter. It keeps the parameter name and type, the result type, the body
+-- tokens and the scope of the definition. The body evaluates in that scope.
+mu Unary : Type 0 with
+| unary : Text -> LType -> LType -> List Token -> List Binding -> Unary
+
+def unaryParam : Unary -> LType := fun (op : Unary) =>
+  case op as self in Unary return LType with
+  | unary name ty result body scope => ty
+
+def unaryResult : Unary -> LType := fun (op : Unary) =>
+  case op as self in Unary return LType with
+  | unary name ty result body scope => result
+
+def unaryBody : Unary -> List Token := fun (op : Unary) =>
+  case op as self in Unary return List Token with
+  | unary name ty result body scope => body
+
+def unaryEnvironment : Unary -> Value -> List Binding :=
+  fun (op : Unary) (value : Value) =>
+  case op as self in Unary return List Binding with
+  | unary name ty result body scope => cons (binding name ty value) scope
+
+def unaryFrom : List Binding -> List Param -> LType -> List Token -> Option Unary :=
+  fun (scope : List Binding) (params : List Param) (result : LType) (body : List Token) =>
+  case params as list in List return Option Unary with
+  | nil => none
+  | cons head tail => (
+      case tail as others in List return Option Unary with
+      | cons next more => none
+      | nil => (
+          case head as first in Param return Option Unary with
+          | param label ty => select (Option Unary) (isTypeParam head) none
+              (some (unary label ty result body scope))))
+
+-- A function parameter keeps the scope of its function argument.
+def unaryOf : List Binding -> Binding -> Option Unary := fun (scope : List Binding) (item : Binding) =>
+  case item as self in Binding return Option Unary with
+  | binding name ty value => none
+  | typeBinding name universe defined => none
+  | arrowBinding name params result => none
+  | funBinding name params result body => unaryFrom scope params result body
+  | closureBinding name params result body captured => unaryFrom (scopeList captured) params result body
+
+def unaryArgument : List Binding -> List Token -> Parsed Unary :=
+  fun (environment : List Binding) (tokens : List Token) =>
+  case tokens as self in List return Parsed Unary with
+  | nil => parseError 0 eUnary
+  | cons head tail => (
+      case head as token in Token return Parsed Unary with
+      | numberToken position number => parseError position eUnary
+      | stringToken position text => parseError position eUnary
+      | punctuation position mark => parseError position eUnary
+      | identifier position name => (
+          case (lookup name environment) as found in Option return Parsed Unary with
+          | none => parseError position eUnary
+          | some item => (
+              case (unaryOf (definitionScope name environment) item) as shaped in Option return Parsed Unary with
+              | none => parseError position eUnary
+              | some op => parsed op tail)))
+
+-- Structure forms act on the last type argument of Option, List and Sum.
+-- Text, Values and Attrs are sequences of bytes, of values and of fields.
+-- A field is the pair of its key and its value.
+mu Shape : Type 0 with
+| shapeOption : LType -> Shape
+| shapeList : LType -> Shape
+| shapeSum : LType -> LType -> Shape
+| shapeSequence : LType -> Shape
+| shapeNone : Shape
+
+def shapeOf : LType -> Shape := fun (ty : LType) =>
+  case ty as self in LType return Shape with
+  | tyNat => shapeNone
+  | tyText => shapeSequence tyNat
+  | tyFlag => shapeNone
+  | tyValue => shapeNone
+  | tyValues => shapeSequence tyValue
+  | tyAttrs => shapeSequence (tyProd tyText tyValue)
+  | tyNamed name => shapeNone
+  | tyOption a => shapeOption a
+  | tyList a => shapeList a
+  | tyProd a b => shapeNone
+  | tySum a b => shapeSum a b
+  | tyUniverse level => shapeNone
+  | tyEq a x y => shapeNone
+  | tyArrow a b => shapeNone
+
+-- 0 no instance, 1 Option, 2 List, 3 Sum E, 4 Text, Values or Attrs. Filter
+-- has no Sum instance, and the sequences have only filter.
+def shapeCode : Nat -> LType -> Nat := fun (form : Nat) (ty : LType) =>
+  case (shapeOf ty) as self in Shape return Nat with
+  | shapeOption a => 1
+  | shapeList a => 2
+  | shapeSum e a => select Nat (numberEq form 4) 0 3
+  | shapeSequence a => select Nat (numberEq form 4) 4 0
+  | shapeNone => 0
+
+def shapeElement : LType -> LType := fun (ty : LType) =>
+  case (shapeOf ty) as self in Shape return LType with
+  | shapeOption a => a
+  | shapeList a => a
+  | shapeSum e a => a
+  | shapeSequence a => a
+  | shapeNone => ty
+
+def shapeWith : LType -> LType -> LType := fun (ty : LType) (element : LType) =>
+  case (shapeOf ty) as self in Shape return LType with
+  | shapeOption a => tyOption element
+  | shapeList a => tyList element
+  | shapeSum e a => tySum e element
+  | shapeSequence a => ty
+  | shapeNone => ty
+
+def someValue : LType -> Value -> Value := fun (ty : LType) (value : Value) =>
+  select Value (encodesNull ty) (objectOne kSome value) value
+
+-- pure x is some x, the list with the one item x, or inr x.
+def pureValue : LType -> Value -> Value := fun (ty : LType) (value : Value) =>
+  case (shapeOf ty) as self in Shape return Value with
+  | shapeOption a => someValue a value
+  | shapeList a => valueItems (valuesItem value valuesEnd)
+  | shapeSum e a => objectOne kInr value
+  | shapeSequence a => value
+  | shapeNone => value
+
+def isNull : Value -> Nat := fun (value : Value) =>
+  case value as self in Value return Nat with
+  | valueNull => 1
+  | valueFlag flag => 0
+  | valueNat number => 0
+  | valueText text => 0
+  | valueItems items => 0
+  | valueAttrs attrs => 0
+
+def isYes : Value -> Nat := fun (value : Value) =>
+  case value as self in Value return Nat with
+  | valueNull => 0
+  | valueFlag flag => (
+      case flag as answer in Flag return Nat with
+      | flagNo => 0
+      | flagYes => 1)
+  | valueNat number => 0
+  | valueText text => 0
+  | valueItems items => 0
+  | valueAttrs attrs => 0
+
+def sumLeft : Value -> Nat := fun (value : Value) =>
+  case value as self in Value return Nat with
+  | valueNull => 0
+  | valueFlag flag => 0
+  | valueNat number => 0
+  | valueText text => 0
+  | valueItems items => 0
+  | valueAttrs attrs => (
+      case attrs as fields in Attrs return Nat with
+      | attrsEnd => 0
+      | attrsField key item rest => sameText key kInl)
+
+def itemsOf : Value -> Values := fun (value : Value) =>
+  case value as self in Value return Values with
+  | valueNull => valuesEnd
+  | valueFlag flag => valuesEnd
+  | valueNat number => valuesEnd
+  | valueText text => valuesEnd
+  | valueItems items => items
+  | valueAttrs attrs => valuesEnd
+
+def rec appendValues : Values -> Values -> Values := fun (front : Values) (back : Values) =>
+  case front as self in Values return Values with
+  | valuesEnd => back
+  | valuesItem head tail => valuesItem head (appendValues tail back)
+
+-- The payload of some x or of inr x. The values none and inl e have none.
+def payloadOf : LType -> LType -> Value -> Option Value :=
+  fun (ty : LType) (element : LType) (value : Value) =>
+  case (shapeOf ty) as self in Shape return Option Value with
+  | shapeOption a => select (Option Value) (isNull value) none
+      (some (select Value (encodesNull element) (projectValue 1 value) value))
+  | shapeList a => none
+  | shapeSum e a => select (Option Value) (sumLeft value) none (some (projectValue 1 value))
+  | shapeSequence a => none
+  | shapeNone => none
+
+-- Join a source value and the result of one application: 2 map wraps the
+-- result again, 3 bind keeps it, 4 filter keeps the source or gives none.
+def stepOne : Nat -> LType -> Value -> Value -> Value :=
+  fun (form : Nat) (ty : LType) (source : Value) (result : Value) =>
+  select Value (numberEq form 3) result (select Value (numberEq form 4)
+    (select Value (isYes result) source valueNull) (pureValue ty result))
+
+def stepItems : Nat -> Value -> Value -> Values -> Values :=
+  fun (form : Nat) (item : Value) (result : Value) (rest : Values) =>
+  select Values (numberEq form 3) (appendValues (itemsOf result) rest)
+    (select Values (numberEq form 4) (select Values (isYes result) (valuesItem item rest) rest)
+      (valuesItem result rest))
+
+-- map takes A -> B for F B, bind takes A -> F B, filter takes A -> Flag.
+def structureFits : Nat -> LType -> Unary -> Nat := fun (form : Nat) (ty : LType) (op : Unary) =>
+  select Nat (numberEq form 2) (sameType (unaryResult op) (shapeElement ty))
+    (select Nat (numberEq form 3) (sameType (unaryResult op) ty)
+      (boolAnd (sameType (unaryResult op) tyFlag) (sameType (unaryParam op) (shapeElement ty))))
+
+-- map and bind read F A for the parameter type A. Filter reads F A itself.
+def structureSource : Nat -> LType -> Unary -> LType := fun (form : Nat) (ty : LType) (op : Unary) =>
+  select LType (numberEq form 4) ty (shapeWith ty (unaryParam op))
+
+-- The result type of an inline function: B for map into F B, F B for bind,
+-- Flag for filter.
+def structureResult : Nat -> LType -> LType := fun (form : Nat) (ty : LType) =>
+  select LType (numberEq form 2) (shapeElement ty) (select LType (numberEq form 3) ty tyFlag)
+
+-- The function argument of fold and unfold names a definition. It keeps the
+-- parameters, the result type and the body tokens.
+mu Stepper : Type 0 with
+| stepper : List Param -> LType -> List Token -> List Binding -> Stepper
+
+def stepperParams : Stepper -> List Param := fun (op : Stepper) =>
+  case op as self in Stepper return List Param with
+  | stepper params result body scope => params
+
+def stepperResult : Stepper -> LType := fun (op : Stepper) =>
+  case op as self in Stepper return LType with
+  | stepper params result body scope => result
+
+def stepperBody : Stepper -> List Token := fun (op : Stepper) =>
+  case op as self in Stepper return List Token with
+  | stepper params result body scope => body
+
+def stepperEnvironment : Stepper -> List Value -> List Binding :=
+  fun (op : Stepper) (values : List Value) =>
+  case op as self in Stepper return List Binding with
+  | stepper params result body scope => bindParams params values scope
+
+def stepperArgument : List Binding -> List Token -> Parsed Stepper :=
+  fun (environment : List Binding) (tokens : List Token) =>
+  case tokens as self in List return Parsed Stepper with
+  | nil => parseError 0 eStep
+  | cons head tail => (
+      case head as token in Token return Parsed Stepper with
+      | numberToken position number => parseError position eStep
+      | stringToken position text => parseError position eStep
+      | punctuation position mark => parseError position eStep
+      | identifier position name => (
+          case (lookup name environment) as found in Option return Parsed Stepper with
+          | none => parseError position eStep
+          | some item => (
+              case item as bound in Binding return Parsed Stepper with
+              | binding other ty value => parseError position eStep
+              | typeBinding other universe defined => parseError position eStep
+              | arrowBinding other params result => parseError position eStep
+              | funBinding other params result body => select (Parsed Stepper) (hasTypeParam params)
+                  (parseError position eStep)
+                  (parsed (stepper params result body (definitionScope other environment)) tail)
+              | closureBinding other params result body scope =>
+                  parsed (stepper params result body (scopeList scope)) tail)))
+
+def rec sameTypes : List LType -> List LType -> Nat := fun (left : List LType) (right : List LType) =>
+  case left as self in List return Nat with
+  | nil => (
+      case right as other in List return Nat with
+      | nil => 1
+      | cons head tail => 0)
+  | cons head tail => (
+      case right as other in List return Nat with
+      | nil => 0
+      | cons first rest => boolAnd (sameType head first) (sameTypes tail rest))
+
+-- Algebra carriers: 1 Nat, 2 a sequence (List A, Text, Values or Attrs),
+-- 0 no instance. Value is a carrier with its own forms: foldValueTerm and
+-- unfoldValueTerm.
+def carrierCode : LType -> Nat := fun (ty : LType) =>
+  case (shapeOf ty) as self in Shape return Nat with
+  | shapeOption a => 0
+  | shapeList a => 2
+  | shapeSum e a => 0
+  | shapeSequence a => 2
+  | shapeNone => select Nat (sameType ty tyNat) 1 0
+
+def rec textElements : Text -> Values := fun (text : Text) =>
+  case text as self in Text return Values with
+  | textEnd => valuesEnd
+  | textByte byte rest => valuesItem (valueNat byte) (textElements rest)
+
+def rec fieldElements : Attrs -> Values := fun (attrs : Attrs) =>
+  case attrs as self in Attrs return Values with
+  | attrsEnd => valuesEnd
+  | attrsField key item rest => valuesItem (objectTwo kFirst (valueText key) kSecond item) (fieldElements rest)
+
+def sequenceElements : Value -> Values := fun (value : Value) =>
+  case value as self in Value return Values with
+  | valueNull => valuesEnd
+  | valueFlag flag => valuesEnd
+  | valueNat number => valuesEnd
+  | valueText text => textElements text
+  | valueItems items => items
+  | valueAttrs attrs => fieldElements attrs
+
+-- A fold over the number n applies its function n times, once for each of n
+-- null items. The fuel bounds n.
+def rec unitItems : Fuel -> Nat -> Option Values := fun (fuel : Fuel) (count : Nat) =>
+  case fuel as guard in Fuel return Option Values with
+  | fuelEnd => select (Option Values) (numberEq count 0) (some valuesEnd) none
+  | fuelMore more => (
+      case (natEq count 0) as done return Option Values with
+      | 1 (x : prod ()) => some valuesEnd
+      | 0 (x : prod ()) => (
+          case (unitItems more (natSub count 1)) as inner in Option return Option Values with
+          | none => none
+          | some items => some (valuesItem valueNull items)))
+
+def elementsOf : Fuel -> Value -> Option Values := fun (fuel : Fuel) (value : Value) =>
+  case (asNat value) as number in Option return Option Values with
+  | none => some (sequenceElements value)
+  | some count => unitItems fuel count
+
+def countOf : Value -> Nat := fun (value : Value) =>
+  case (asNat value) as number in Option return Nat with
+  | none => 0
+  | some count => count
+
+def rec countValues : Values -> Nat := fun (items : Values) =>
+  case items as self in Values return Nat with
+  | valuesEnd => 0
+  | valuesItem item rest => natAdd (countValues rest) 1
+
+def rec textOfElements : Values -> Option Text := fun (items : Values) =>
+  case items as self in Values return Option Text with
+  | valuesEnd => some textEnd
+  | valuesItem item rest => (
+      case (textOfElements rest) as tail in Option return Option Text with
+      | none => none
+      | some text => (
+          case (asNat item) as byte in Option return Option Text with
+          | none => none
+          | some number => select (Option Text) (numberLt number 256) (some (textByte number text)) none))
+
+def keyOf : Value -> Text := fun (item : Value) =>
+  case (asText (projectValue 1 item)) as key in Option return Text with
+  | none => textEnd
+  | some text => text
+
+def rec fieldsOf : Values -> Result Attrs := fun (items : Values) =>
+  case items as self in Values return Result Attrs with
+  | valuesEnd => success attrsEnd
+  | valuesItem item rest => (
+      case (fieldsOf rest) as tail in Result return Result Attrs with
+      | failure at message => failure at message
+      | success attrs => select (Result Attrs) (hasField (keyOf item) attrs)
+          (failure 0 eField)
+          (success (attrsField (keyOf item) (projectValue 2 item) attrs)))
+
+-- Build a carrier value from its elements: the count for Nat, the bytes for
+-- Text, the fields for Attrs, and the items otherwise. Reject invalid bytes
+-- and duplicate attribute keys before the value can be consumed or printed.
+def rebuild : LType -> Values -> Result Value := fun (ty : LType) (items : Values) =>
+  case (natEq (sameType ty tyText) 1) as textual return Result Value with
+  | 1 (x : prod ()) => (
+      case (textOfElements items) as text in Option return Result Value with
+      | none => failure 0 eByte
+      | some bytes => success (valueText bytes))
+  | 0 (x : prod ()) => (
+      case (natEq (sameType ty tyAttrs) 1) as fields return Result Value with
+      | 1 (x : prod ()) => (
+          case (fieldsOf items) as attrs in Result return Result Value with
+          | failure at message => failure at message
+          | success fields => success (valueAttrs fields))
+      | 0 (x : prod ()) => success (select Value (sameType ty tyNat)
+          (valueNat (countValues items)) (valueItems items)))
+
+-- fold over Nat takes C -> C. Over a sequence of E it takes E -> C -> C.
+def foldFits : LType -> LType -> Stepper -> Nat := fun (ty : LType) (result : LType) (op : Stepper) =>
+  boolAnd (sameType (stepperResult op) result) (sameTypes (paramTypes (stepperParams op))
+    (select (List LType) (sameType ty tyNat) (cons result nil) (cons (shapeElement ty) (cons result nil))))
+
+-- The seed of unfold is the type of the first parameter.
+def paramSeed : List Param -> LType := fun (params : List Param) =>
+  case (paramTypes params) as types in List return LType with
+  | nil => tyNat
+  | cons head tail => head
+
+def unfoldSeed : Stepper -> LType := fun (op : Stepper) =>
+  paramSeed (stepperParams op)
+
+-- unfold into Nat takes S -> Option S. Into a sequence of E it takes
+-- S -> Option (Prod E S).
+def unfoldFits : LType -> Stepper -> Nat := fun (ty : LType) (op : Stepper) =>
+  boolAnd (sameTypes (paramTypes (stepperParams op)) (cons (unfoldSeed op) nil))
+    (sameType (stepperResult op) (tyOption (select LType (sameType ty tyNat) (unfoldSeed op)
+      (tyProd (shapeElement ty) (unfoldSeed op)))))
+
+-- The algebra of a fold over Value has one case for each constructor. The
+-- initial value is the case of valueNull. The five functions follow in
+-- constructor order: valueNat, valueFlag, valueText, valueItems, valueAttrs.
+mu ValueAlgebra : Type 0 with
+| valueAlgebra : Stepper -> Stepper -> Stepper -> Stepper -> Stepper -> ValueAlgebra
+
+def algebraStep : Nat -> ValueAlgebra -> Stepper := fun (index : Nat) (ops : ValueAlgebra) =>
+  case ops as self in ValueAlgebra return Stepper with
+  | valueAlgebra onNat onFlag onText onItems onAttrs => select Stepper (numberEq index 1) onNat
+      (select Stepper (numberEq index 2) onFlag (select Stepper (numberEq index 3) onText
+        (select Stepper (numberEq index 4) onItems onAttrs)))
+
+-- 0 valueNull, 1 valueNat, 2 valueFlag, 3 valueText, 4 valueItems,
+-- 5 valueAttrs.
+def valueIndex : Value -> Nat := fun (value : Value) =>
+  case value as self in Value return Nat with
+  | valueNull => 0
+  | valueNat number => 1
+  | valueFlag flag => 2
+  | valueText text => 3
+  | valueItems items => 4
+  | valueAttrs attrs => 5
+
+-- For the result type C the functions take Nat, Flag, Text, List C and
+-- List (Prod Text C).
+def algebraParam : Nat -> LType -> LType := fun (index : Nat) (result : LType) =>
+  select LType (numberEq index 1) tyNat (select LType (numberEq index 2) tyFlag
+    (select LType (numberEq index 3) tyText (select LType (numberEq index 4) (tyList result)
+      (tyList (tyProd tyText result)))))
+
+-- A second function name after the first selects the fold over Value. The
+-- initial value is a data value, so it is never the bare name of a function.
+def namesFunction : List Binding -> List Token -> Nat :=
+  fun (environment : List Binding) (tokens : List Token) =>
+  case (stepperArgument environment tokens) as named in Parsed return Nat with
+  | parseError at message => 0
+  | parsed op rest => 1
+
+-- The children of a Value: its items, or its fields as pairs of key and value.
+def childElements : Value -> Values := fun (value : Value) =>
+  case value as self in Value return Values with
+  | valueNull => valuesEnd
+  | valueNat number => valuesEnd
+  | valueFlag flag => valuesEnd
+  | valueText text => valuesEnd
+  | valueItems items => items
+  | valueAttrs attrs => fieldElements attrs
+
+-- A scalar gives its payload to its function. Items and fields give the list
+-- of the results of their children.
+def algebraInput : Value -> Values -> Value := fun (value : Value) (results : Values) =>
+  select Value (numberLt (valueIndex value) 4) value (valueItems results)
+
+-- The coalgebra of an unfold into Value gives the layer of a seed of type S:
+-- none for valueNull, or a number, a flag, a text, the seeds of the items, or
+-- the keys and seeds of the fields.
+def valueLayer : LType -> LType := fun (seed : LType) =>
+  tyOption (tySum tyNat (tySum tyFlag (tySum tyText
+    (tySum (tyList seed) (tyList (tyProd tyText seed))))))
+
+def unfoldValueFits : Stepper -> Nat := fun (op : Stepper) =>
+  boolAnd (sameTypes (paramTypes (stepperParams op)) (cons (unfoldSeed op) nil))
+    (sameType (stepperResult op) (valueLayer (unfoldSeed op)))
+
+-- The result type of an inline function of fold or unfold. A fold (mode 0)
+-- gives the declared type. unfold into a carrier (mode 1) and unfold into
+-- Value (mode 2) give the type that the seed of the first binder asks for.
+def inlineResult : Nat -> LType -> List Param -> LType :=
+  fun (mode : Nat) (expected : LType) (params : List Param) =>
+  select LType (numberEq mode 0) expected
+    (select LType (numberEq mode 1)
+      (tyOption (select LType (sameType expected tyNat) (paramSeed params)
+        (tyProd (shapeElement expected) (paramSeed params))))
+      (valueLayer (paramSeed params)))
+
+-- One binder (x : A) of an inline function. A has a data type.
+def inlineBinder : Fuel -> List Binding -> List Binding -> List Token -> Parsed Param :=
+  fun (fuel : Fuel) (environment : List Binding) (seen : List Binding) (tokens : List Token) =>
+  case (expectMark 40 tokens) as opening in Parsed return Parsed Param with
+  | parseError at message => parseError at eFun
+  | parsed ignored afterOpen => (
+    case afterOpen as self in List return Parsed Param with
+    | nil => parseError (firstPosition tokens) eFun
+    | cons head afterName => (
+      case head as token in Token return Parsed Param with
+      | numberToken at number => parseError at eFun
+      | stringToken at text => parseError at eFun
+      | punctuation at mark => parseError at eFun
+      | identifier at label => (
+        case (natEq (reservedName label) 1) as reserved return Parsed Param with
+        | 1 (x : prod ()) => parseError at eReserved
+        | 0 (x : prod ()) => (
+          case (lookup label seen) as previous in Option return Parsed Param with
+          | some ignored => parseError at eDuplicate
+          | none => (
+          case (expectMark 58 afterName) as colon in Parsed return Parsed Param with
+          | parseError spot message => parseError spot eFun
+          | parsed ignored afterColon => (
+            case (parseType fuel 0 environment afterColon) as declared in Parsed return Parsed Param with
+            | parseError spot message => parseError spot message
+            | parsed ty afterType => (
+              case (natEq (typeLevel ty) 0) as plain return Parsed Param with
+              | 0 (x : prod ()) => parseError (firstPosition afterColon) eData
+              | 1 (x : prod ()) => (
+                case (expectMark 41 afterType) as closing in Parsed return Parsed Param with
+                | parseError spot message => parseError spot eFun
+                | parsed ignored rest => parsed (param label ty) rest))))))))
+
+-- One or more binders up to =>. The result keeps the tokens of the body.
+-- Earlier binders shadow outer names in later annotations. seen contains
+-- only this function's binders, so shadowing an outer definition is allowed.
+def rec inlineBinders : Fuel -> List Binding -> List Binding -> List Token -> Parsed (List Param) :=
+  fun (fuel : Fuel) (environment : List Binding) (seen : List Binding) (tokens : List Token) =>
+  case fuel as guard in Fuel return Parsed (List Param) with
+  | fuelEnd => parseError (firstPosition tokens) eFuel
+  | fuelMore more => (
+    case (inlineBinder more environment seen tokens) as first in Parsed return Parsed (List Param) with
+    | parseError spot message => parseError spot message
+    | parsed binder afterBinder => (
+      case binder as named in Param return Parsed (List Param) with
+      | param label ty => (
+      case (expectMark 63 afterBinder) as arrow in Parsed return Parsed (List Param) with
+      | parsed ignored body => parsed (cons binder nil) body
+      | parseError spot message => (
+        case (inlineBinders more (bindParams (cons binder nil) nil environment)
+          (cons (binding label ty valueNull) seen) afterBinder) as others in Parsed return Parsed (List Param) with
+        | parseError at problem => parseError at problem
+        | parsed binders body => parsed (cons binder binders) body))))
+
+-- 0 none, then the place of the payload in the sum: 1 a number, 2 a flag,
+-- 3 a text, 4 the items, 5 the fields.
+def layerIndex : Value -> Nat := fun (layer : Value) =>
+  select Nat (isNull layer) 0 (select Nat (sumLeft layer) 1
+    (select Nat (sumLeft (projectValue 1 layer)) 2
+      (select Nat (sumLeft (projectValue 1 (projectValue 1 layer))) 3
+        (select Nat (sumLeft (projectValue 1 (projectValue 1 (projectValue 1 layer)))) 4 5))))
+
+def layerPayload : Value -> Value := fun (layer : Value) =>
+  select Value (numberEq (layerIndex layer) 1) (projectValue 1 layer)
+    (select Value (numberEq (layerIndex layer) 2) (projectValue 1 (projectValue 1 layer))
+      (select Value (numberEq (layerIndex layer) 3) (projectValue 1 (projectValue 1 (projectValue 1 layer)))
+        (projectValue 1 (projectValue 1 (projectValue 1 (projectValue 1 layer))))))
+
+-- The values that an unfold into Value built, with the number of
+-- applications that remain.
+mu Grown : Type 0 with
+| grown : Values -> Nat -> Grown
+
+def grownItems : Grown -> Values := fun (built : Grown) =>
+  case built as self in Grown return Values with
+  | grown items limit => items
+
+def grownLimit : Grown -> Nat := fun (built : Grown) =>
+  case built as self in Grown return Nat with
+  | grown items limit => limit
+
+def grownHead : Grown -> Value := fun (built : Grown) =>
+  case built as self in Grown return Value with
+  | grown items limit => (
+      case items as list in Values return Value with
+      | valuesEnd => valueNull
+      | valuesItem head rest => head)
+
+def grownLeaf : Value -> Nat -> Grown := fun (value : Value) (limit : Nat) =>
+  grown (valuesItem value valuesEnd) limit
+
+-- The term block gives the work budget that remains with each result. The
+-- budget is one more than the number of function bodies that the program can
+-- still evaluate. parseTerm refuses the budget 0.
+mu Worked (0 A : Type 0) : Type 0 with
+| worked : A -> List Token -> Nat -> Worked A
+| workError : Nat -> Text -> Worked A
+
+def liftParsed : (0 A : Type 0) -> Nat -> Parsed A -> Worked A :=
+  fun (0 A : Type 0) (budget : Nat) (result : Parsed A) =>
+  case result as self in Parsed return Worked A with
+  | parseError at message => workError at message
+  | parsed found rest => worked found rest budget
+
+def checkWorked : Nat -> LType -> Worked Typed -> Worked Value :=
+  fun (position : Nat) (expected : LType) (result : Worked Typed) =>
+  case result as self in Worked return Worked Value with
+  | workError at message => workError at message
+  | worked found rest budget => liftParsed Value budget (checkSynthesized position expected (parsed found rest))
+
+-- A synthesized argument is an earlier definition, a projection, symm,
+-- trans, either, an application, or one of these in parentheses. An
+-- application evaluates the checked body of the function with the argument
+-- values and uses one unit of the work budget. In the check of a function
+-- body, an application checks its arguments and gives null.
+def rec synthTerm : Fuel -> Nat -> Nat -> List Binding -> List Token -> Worked Typed :=
+  fun (fuel : Fuel) (budget : Nat) (atom : Nat) (environment : List Binding) (tokens : List Token) =>
+  case fuel as guard in Fuel return Worked Typed with
+  | fuelEnd => workError (firstPosition tokens) eFuel
+  | fuelMore more => (
+    case tokens as self in List return Worked Typed with
+    | nil => workError 0 eInfer
+    | cons head tail => (
+      case head as token in Token return Worked Typed with
+      | numberToken position number => workError position eInfer
+      | stringToken position text => workError position eInfer
+      | punctuation position mark => (
+          case (natEq mark 40) as opening return Worked Typed with
+          | 0 (x : prod ()) => workError position eInfer
+          | 1 (x : prod ()) => (
+              case (synthTerm more budget 0 environment tail) as inside in Worked return Worked Typed with
+              | workError at message => workError at message
+              | worked found rest budget => liftParsed Typed budget (closeParsed Typed found rest)))
+      | identifier position name => (
+          case (lookup name environment) as known in Option return Worked Typed with
+          | some item => (
+              case item as bound in Binding return Worked Typed with
+              | binding other ty value => worked (typed ty value) tail budget
+              | typeBinding other universe defined => workError position eInfer
+              | arrowBinding other params result => workError position eInfer
+              | funBinding other params result body => (
+                  case (natEq atom 1) as refused return Worked Typed with
+                  | 1 (x : prod ()) => workError position eParen
+                  | 0 (x : prod ()) => (
+                    case (typeArguments more params environment nil tail) as instantiated in Parsed return Worked Typed with
+                    | parseError at message => workError at message
+                    | parsed chosen afterTypes => (
+                      case (parseArguments more budget 1 (paramTypes (valueParams chosen params)) environment afterTypes) as checked in Worked return Worked Typed with
+                      | workError at message => workError at message
+                      | worked values rest budget => (
+                          case (natEq (checkingBody environment) 1) as marked return Worked Typed with
+                          | 1 (x : prod ()) => worked (typed (substType chosen result) valueNull) rest budget
+                          | 0 (x : prod ()) => (
+                              case (parseTerm more (natSub budget 1) 0 (substType chosen result) (bindArguments environment (valueParams chosen params) values (reverseListOnto Binding (definitionScope other environment) chosen)) body) as applied in Worked return Worked Typed with
+                              | workError at message => workError at message
+                              | worked value after budget => worked (typed (substType chosen result) value) rest budget)))))
+              | closureBinding other params result body scope => (
+                  case (natEq atom 1) as refused return Worked Typed with
+                  | 1 (x : prod ()) => workError position eParen
+                  | 0 (x : prod ()) => (
+                      case (parseArguments more budget 1 (paramTypes params) environment tail) as checked in Worked return Worked Typed with
+                      | workError at message => workError at message
+                      | worked values rest budget => (
+                          case (natEq (checkingBody environment) 1) as marked return Worked Typed with
+                          | 1 (x : prod ()) => worked (typed result valueNull) rest budget
+                          | 0 (x : prod ()) => (
+                              case (parseTerm more (natSub budget 1) 0 result (bindArguments environment params values (scopeList scope)) body) as applied in Worked return Worked Typed with
+                              | workError at message => workError at message
+                              | worked value after budget => worked (typed result value) rest budget)))))
+          | none => (
+              case (natEq (synthForm name) 0) as plain return Worked Typed with
+              | 1 (x : prod ()) => workError position eInfer
+              | 0 (x : prod ()) => (
+                  case (natEq atom 1) as bare return Worked Typed with
+                  | 1 (x : prod ()) => workError position eParen
+                  | 0 (x : prod ()) => (
+                    case (natEq (synthForm name) 5) as choice return Worked Typed with
+                    | 1 (x : prod ()) => eitherTerm more budget position environment tail
+                    | 0 (x : prod ()) => (
+                      case (synthTerm more budget 1 environment tail) as argument in Worked return Worked Typed with
+                      | workError at message => workError at message
+                      | worked found rest budget => (
+                          case (natLt (synthForm name) 3) as projection return Worked Typed with
+                          | 1 (x : prod ()) => liftParsed Typed budget (project position (synthForm name) found rest)
+                          | 0 (x : prod ()) => (
+                              case (natEq (synthForm name) 3) as symmetric return Worked Typed with
+                              | 1 (x : prod ()) => liftParsed Typed budget (symmProof position found rest)
+                              | 0 (x : prod ()) => (
+                                  case (synthTerm more budget 1 environment rest) as second in Worked return Worked Typed with
+                                  | workError at message => workError at message
+                                  | worked other after budget => liftParsed Typed budget (transProof position found other after)))))))))))
+
+-- Parsing, checking and constructor evaluation are fused in this M0 slice.
+-- An argument (atom = 1) is a literal, a reference, a nullary constructor or
+-- a parenthesized term.
+and parseTerm : Fuel -> Nat -> Nat -> LType -> List Binding -> List Token -> Worked Value :=
+  fun (fuel : Fuel) (budget : Nat) (atom : Nat) (expected : LType) (environment : List Binding) (tokens : List Token) =>
+  case fuel as guard in Fuel return Worked Value with
+  | fuelEnd => workError (firstPosition tokens) eFuel
+  | fuelMore more => (
+    case (natEq budget 0) as spent return Worked Value with
+    | 1 (x : prod ()) => workError (firstPosition tokens) eBudget
+    | 0 (x : prod ()) => (
+    case tokens as self in List return Worked Value with
+    | nil => workError 0 eTerm
+    | cons head tail => (
+      case head as token in Token return Worked Value with
+      | numberToken position number => select (Worked Value) (sameType expected tyNat)
+          (worked (valueNat number) tail budget) (workError position eTerm)
+      | stringToken position text => select (Worked Value) (sameType expected tyText)
+          (worked (valueText text) tail budget) (workError position eTerm)
+      | punctuation position mark => (
+          case (natEq mark 40) as opening return Worked Value with
+          | 0 (x : prod ()) => workError position eTerm
+          | 1 (x : prod ()) => (
+              case (parseTerm more budget 0 expected environment tail) as inside in Worked return Worked Value with
+              | workError at message => workError at message
+              | worked value rest budget => liftParsed Value budget (closeParsed Value value rest)))
+      | identifier position name => (
+          case (natEq (boolAnd (sameText name sfun) (isArrowType expected)) 1) as inlined return Worked Value with
+          | 1 (x : prod ()) => (
+              case (natEq atom 1) as bare return Worked Value with
+              | 1 (x : prod ()) => workError position eParen
+              | 0 (x : prod ()) => inlineArgument more budget position expected environment tail)
+          | 0 (x : prod ()) => (
+          case (lookup name environment) as found in Option return Worked Value with
+          | some item => (
+              case item as known in Binding return Worked Value with
+              | binding other ty value => select (Worked Value) (sameType expected ty)
+                  (worked value tail budget) (workError position eTerm)
+              | typeBinding other universe defined => workError position eTerm
+              | arrowBinding other params result => workError position eTerm
+              | funBinding other params result body => (
+                  case (natEq (isArrowType expected) 1) as higher return Worked Value with
+                  | 1 (x : prod ()) => partialArgument more budget atom position expected name params result environment tail
+                  | 0 (x : prod ()) => checkWorked position expected (synthTerm more budget atom environment tokens))
+              | closureBinding other params result body scope => (
+                  case (natEq (isArrowType expected) 1) as higher return Worked Value with
+                  | 1 (x : prod ()) => partialArgument more budget atom position expected name params result environment tail
+                  | 0 (x : prod ()) => checkWorked position expected (synthTerm more budget atom environment tokens)))
+          | none => (
+              case (constructorPlan expected name) as selected in Option return Worked Value with
+              | none => (
+                  case (natEq (synthForm name) 0) as plain return Worked Value with
+                  | 1 (x : prod ()) => (
+                      case (natEq (structureForm name) 0) as structural return Worked Value with
+                      | 1 (x : prod ()) => select (Worked Value) (sameText name srefl)
+                          (liftParsed Value budget (reflCheck position expected tail)) (workError position (unknownName expected name))
+                      | 0 (x : prod ()) => (
+                          case (natLt (structureForm name) 5) as monadic return Worked Value with
+                          | 1 (x : prod ()) => structureTerm more budget position (structureForm name) atom expected environment tail
+                          | 0 (x : prod ()) => (
+                              case (natEq (structureForm name) 5) as folding return Worked Value with
+                              | 1 (x : prod ()) => foldTerm more budget position atom expected environment tail
+                              | 0 (x : prod ()) => unfoldTerm more budget position atom expected environment tail)))
+                  | 0 (x : prod ()) => checkWorked position expected (synthTerm more budget atom environment tokens))
+              | some selected => (
+                      case (natEq (boolAnd atom (hasArguments (planArguments selected))) 1) as bare return Worked Value with
+                      | 1 (x : prod ()) => workError position eParen
+                      | 0 (x : prod ()) => (
+                          case (parseArguments more budget 1 (planArguments selected) environment tail) as checked in Worked return Worked Value with
+                          | workError at message => workError at message
+                          | worked values rest budget => (
+                              case (evaluatePlan selected values) as evaluated in Result return Worked Value with
+                              | failure at message => select (Worked Value) (checkingBody environment)
+                                  (worked valueNull rest budget) (workError position message)
+                              | success value => worked value rest budget)))))))))
+-- A function argument is the name of a function whose type is the expected
+-- function type, or a parenthesized partial application `(g a1 .. ak)` of a
+-- function whose last parameters and result form the expected function type.
+-- The bound arguments are checked in the environment of the application. A
+-- bound argument of a function type is a name, a parenthesized inline
+-- function or a partial application. A bare partial application needs parentheses.
+-- A function with type parameters takes its type arguments first.
+and partialArgument : Fuel -> Nat -> Nat -> Nat -> LType -> Text -> List Param -> LType -> List Binding -> List Token -> Worked Value :=
+  fun (fuel : Fuel) (budget : Nat) (atom : Nat) (position : Nat) (expected : LType) (name : Text) (params : List Param) (result : LType) (environment : List Binding) (tokens : List Token) =>
+  case fuel as guard in Fuel return Worked Value with
+  | fuelEnd => workError position eFuel
+  | fuelMore more => (
+    case (natEq (sameType expected (arrowType params result)) 1) as exact return Worked Value with
+    | 1 (x : prod ()) => worked (valueText name) tokens budget
+    | 0 (x : prod ()) => (
+      case (natEq (hasTypeParam params) 1) as polymorphic return Worked Value with
+      | 0 (x : prod ()) => prefixArgument more budget atom position expected name params params result environment tokens tokens
+      | 1 (x : prod ()) => (
+        case (natEq atom 1) as bare return Worked Value with
+        | 1 (x : prod ()) => workError position eTerm
+        | 0 (x : prod ()) => (
+          case (typeArguments more params environment nil tokens) as instantiated in Parsed return Worked Value with
+          | parseError at message => workError at message
+          | parsed chosen afterTypes => prefixArgument more budget atom position expected name params
+              (valueParams chosen params) (substType chosen result) environment tokens afterTypes))))
+-- The bound arguments bind the leading value parameters, after the type
+-- arguments. formal holds the value parameters with the type arguments.
+and prefixArgument : Fuel -> Nat -> Nat -> Nat -> LType -> Text -> List Param -> List Param -> LType -> List Binding -> List Token -> List Token -> Worked Value :=
+  fun (fuel : Fuel) (budget : Nat) (atom : Nat) (position : Nat) (expected : LType) (name : Text) (params : List Param) (formal : List Param) (result : LType) (environment : List Binding) (tokens : List Token) (afterTypes : List Token) =>
+  case fuel as guard in Fuel return Worked Value with
+  | fuelEnd => workError position eFuel
+  | fuelMore more => (
+    case (natEq (sameType expected (arrowType (dropCount Param Param (boundParams formal (arrowParams expected)) formal) result)) 0) as mismatch return Worked Value with
+    | 1 (x : prod ()) => workError position eTerm
+    | 0 (x : prod ()) => (
+      case (natEq atom 1) as bare return Worked Value with
+      | 1 (x : prod ()) => workError position eParen
+      | 0 (x : prod ()) => (
+        case (parseArguments more budget 1 (paramTypes (boundParams formal (arrowParams expected))) environment afterTypes) as checked in Worked return Worked Value with
+        | workError at message => workError at message
+        | worked values rest budget => select (Worked Value) (boundFunctions (boundParams formal (arrowParams expected)) values)
+            (worked (valueItems (valuesOfList (cons (valueText name) (typedBound params tokens afterTypes values)))) rest budget)
+            (workError position eTerm))))
+-- An inline function argument `(fun (x : A) .. => body)` has one or more
+-- binders of data types that match the parameters of the expected function
+-- type. Its body is checked against the expected result type with each
+-- binder bound to null. The value keeps the binder names and the body tokens.
+and inlineArgument : Fuel -> Nat -> Nat -> LType -> List Binding -> List Token -> Worked Value :=
+  fun (fuel : Fuel) (budget : Nat) (position : Nat) (expected : LType) (environment : List Binding) (tokens : List Token) =>
+  case fuel as guard in Fuel return Worked Value with
+  | fuelEnd => workError position eFuel
+  | fuelMore more => (
+    case (inlineBinders more environment nil tokens) as binders in Parsed return Worked Value with
+    | parseError spot message => workError spot message
+    | parsed params body => (
+      case (natEq (sameType expected (arrowType params (arrowResult expected))) 1) as fits return Worked Value with
+      | 0 (x : prod ()) => workError position eTerm
+      | 1 (x : prod ()) => (
+        case (parseTerm more budget 0 (arrowResult expected) (bindParams params nil (cons checkMarker environment)) body) as checked in Worked return Worked Value with
+        | workError spot message => workError spot message
+        | worked value rest budget => worked
+            (inlineValue params (takeCount Token Token (dropCount Token Token rest body) body)) rest budget)))
+and parseArguments :Fuel -> Nat -> Nat -> List LType -> List Binding -> List Token -> Worked (List Value) :=
+  fun (fuel : Fuel) (budget : Nat) (atom : Nat) (types : List LType) (environment : List Binding) (tokens : List Token) =>
+  case fuel as guard in Fuel return Worked (List Value) with
+  | fuelEnd => workError (firstPosition tokens) eFuel
+  | fuelMore more => (
+    case types as self in List return Worked (List Value) with
+    | nil => worked nil tokens budget
+    | cons head tail => (
+        case (parseTerm more budget atom head environment tokens) as first in Worked return Worked (List Value) with
+        | workError at message => workError at message
+        | worked value rest budget => (
+            case (parseArguments more budget atom tail environment rest) as remaining in Worked return Worked (List Value) with
+            | workError at message => workError at message
+            | worked values after budget => worked (cons value values) after budget)))
+-- The function of a structure form is a name, or a parenthesized partial
+-- application that binds all but the last parameter of a function.
+and unaryTerm : Fuel -> Nat -> LType -> List Binding -> List Token -> Worked Unary :=
+  fun (fuel : Fuel) (budget : Nat) (wanted : LType) (environment : List Binding) (tokens : List Token) =>
+  case fuel as guard in Fuel return Worked Unary with
+  | fuelEnd => workError (firstPosition tokens) eFuel
+  | fuelMore more => (
+    case tokens as self in List return Worked Unary with
+    | nil => liftParsed Unary budget (unaryArgument environment tokens)
+    | cons head tail => (
+      case head as token in Token return Worked Unary with
+      | numberToken position number => liftParsed Unary budget (unaryArgument environment tokens)
+      | stringToken position text => liftParsed Unary budget (unaryArgument environment tokens)
+      | identifier position name => liftParsed Unary budget (unaryArgument environment tokens)
+      | punctuation position mark => (
+        case (natEq mark 40) as opening return Worked Unary with
+        | 0 (x : prod ()) => workError position eUnary
+        | 1 (x : prod ()) => (
+          case (partialUnary more budget wanted environment tail) as inside in Worked return Worked Unary with
+          | workError at message => workError at message
+          | worked op rest budget => liftParsed Unary budget (closeParsed Unary op rest)))))
+-- Inside the parentheses: a group, an inline function, or the name of a
+-- function followed by its bound arguments.
+and partialUnary : Fuel -> Nat -> LType -> List Binding -> List Token -> Worked Unary :=
+  fun (fuel : Fuel) (budget : Nat) (wanted : LType) (environment : List Binding) (tokens : List Token) =>
+  case fuel as guard in Fuel return Worked Unary with
+  | fuelEnd => workError (firstPosition tokens) eFuel
+  | fuelMore more => (
+    case tokens as self in List return Worked Unary with
+    | nil => workError 0 eUnary
+    | cons head tail => (
+      case head as token in Token return Worked Unary with
+      | numberToken position number => workError position eUnary
+      | stringToken position text => workError position eUnary
+      | punctuation position mark => (
+        case (natEq mark 40) as opening return Worked Unary with
+        | 0 (x : prod ()) => workError position eUnary
+        | 1 (x : prod ()) => unaryTerm more budget wanted environment tokens)
+      | identifier position name => (
+        case (natEq (sameText name sfun) 1) as lambda return Worked Unary with
+        | 1 (x : prod ()) => inlineUnary more budget position wanted environment tail
+        | 0 (x : prod ()) => (
+        case (lookup name environment) as found in Option return Worked Unary with
+        | none => workError position eUnary
+        | some item => (
+          case item as known in Binding return Worked Unary with
+          | binding other ty value => workError position eUnary
+          | typeBinding other universe defined => workError position eUnary
+          | arrowBinding other params result => workError position eUnary
+          | funBinding other params result body => boundUnary more budget position name params result environment tail
+          | closureBinding other params result body captured => boundUnary more budget position name params result environment tail)))))
+-- fun (x : A) => body inside the parentheses of a form: one binder with a
+-- data type, then the body. The body is checked once against the result
+-- type the form expects, with x bound to null. The function keeps the scope
+-- of the form, so the body sees the definitions and parameters around it.
+and inlineUnary : Fuel -> Nat -> Nat -> LType -> List Binding -> List Token -> Worked Unary :=
+  fun (fuel : Fuel) (budget : Nat) (position : Nat) (wanted : LType) (environment : List Binding) (tokens : List Token) =>
+  case fuel as guard in Fuel return Worked Unary with
+  | fuelEnd => workError position eFuel
+  | fuelMore more => (
+    case (expectMark 40 tokens) as opening in Parsed return Worked Unary with
+    | parseError at message => workError at eFun
+    | parsed ignored afterOpen => (
+      case afterOpen as self in List return Worked Unary with
+      | nil => workError position eFun
+      | cons head afterName => (
+        case head as token in Token return Worked Unary with
+        | numberToken at number => workError at eFun
+        | stringToken at text => workError at eFun
+        | punctuation at mark => workError at eFun
+        | identifier at label => (
+          case (natEq (reservedName label) 1) as reserved return Worked Unary with
+          | 1 (x : prod ()) => workError at eReserved
+          | 0 (x : prod ()) => (
+            case (expectMark 58 afterName) as colon in Parsed return Worked Unary with
+            | parseError spot message => workError spot eFun
+            | parsed ignored afterColon => (
+              case (parseType more 0 environment afterColon) as declared in Parsed return Worked Unary with
+              | parseError spot message => workError spot message
+              | parsed ty afterType => (
+                case (natEq (typeLevel ty) 0) as plain return Worked Unary with
+                | 0 (x : prod ()) => workError (firstPosition afterColon) eData
+                | 1 (x : prod ()) => (
+                  case (expectMark 41 afterType) as closing in Parsed return Worked Unary with
+                  | parseError spot message => workError spot eFun
+                  | parsed ignored afterBinder => (
+                    case (expectMark 63 afterBinder) as arrow in Parsed return Worked Unary with
+                    | parseError spot message => workError spot eFun
+                    | parsed ignored body => (
+                      case (parseTerm more budget 0 wanted (cons (binding label ty valueNull) (cons checkMarker environment)) body) as checked in Worked return Worked Unary with
+                      | workError spot message => workError spot message
+                      | worked value rest budget => worked
+                          (unary label ty wanted (takeCount Token Token (dropCount Token Token rest body) body) environment)
+                          rest budget))))))))))
+-- The bound arguments are checked in the caller scope against the front
+-- parameters. A bound function argument is a name or an inline function.
+-- The closure keeps the last parameter.
+and boundUnary : Fuel -> Nat -> Nat -> Text -> List Param -> LType -> List Binding -> List Token -> Worked Unary :=
+  fun (fuel : Fuel) (budget : Nat) (position : Nat) (name : Text) (params : List Param) (result : LType) (environment : List Binding) (tokens : List Token) =>
+  case fuel as guard in Fuel return Worked Unary with
+  | fuelEnd => workError position eFuel
+  | fuelMore more => (
+    case (typeArguments more params environment nil tokens) as instantiated in Parsed return Worked Unary with
+    | parseError at message => workError at message
+    | parsed chosen afterTypes => (
+      case (parseArguments more budget 1 (paramTypes (frontParams (valueParams chosen params))) environment afterTypes) as checked in Worked return Worked Unary with
+      | workError at message => workError at message
+      | worked values rest budget => (
+        case (natEq (boundFunctions (frontParams (valueParams chosen params)) values) 0) as nested return Worked Unary with
+        | 1 (x : prod ()) => workError position eTerm
+        | 0 (x : prod ()) => (
+          case (unaryOf environment (partialClosure name (arrowType (dropCount Param Param (frontParams (valueParams chosen params)) (valueParams chosen params)) (substType chosen result)) name (typedBound params tokens afterTypes values) environment)) as shaped in Option return Worked Unary with
+          | none => workError position eUnary
+          | some op => worked op rest budget))))
+-- The function of fold or unfold is a name, a parenthesized partial
+-- application, or a parenthesized inline fun. The bound arguments are the
+-- arguments written before the closing parenthesis; the form then checks the
+-- parameters that are left. mode and expected give the result type of an
+-- inline fun (see inlineResult).
+and stepperTerm : Fuel -> Nat -> Nat -> LType -> List Binding -> List Token -> Worked Stepper :=
+  fun (fuel : Fuel) (budget : Nat) (mode : Nat) (expected : LType) (environment : List Binding) (tokens : List Token) =>
+  case fuel as guard in Fuel return Worked Stepper with
+  | fuelEnd => workError (firstPosition tokens) eFuel
+  | fuelMore more => (
+    case tokens as self in List return Worked Stepper with
+    | nil => liftParsed Stepper budget (stepperArgument environment tokens)
+    | cons head tail => (
+      case head as token in Token return Worked Stepper with
+      | numberToken position number => liftParsed Stepper budget (stepperArgument environment tokens)
+      | stringToken position text => liftParsed Stepper budget (stepperArgument environment tokens)
+      | identifier position name => liftParsed Stepper budget (stepperArgument environment tokens)
+      | punctuation position mark => (
+        case (natEq mark 40) as opening return Worked Stepper with
+        | 0 (x : prod ()) => workError position eStep
+        | 1 (x : prod ()) => (
+          case (partialStepper more budget mode expected environment tail) as inside in Worked return Worked Stepper with
+          | workError at message => workError at message
+          | worked op rest budget => liftParsed Stepper budget (closeParsed Stepper op rest)))))
+-- Inside the parentheses: a group, an inline fun, or the name of a function
+-- followed by its bound arguments.
+and partialStepper : Fuel -> Nat -> Nat -> LType -> List Binding -> List Token -> Worked Stepper :=
+  fun (fuel : Fuel) (budget : Nat) (mode : Nat) (expected : LType) (environment : List Binding) (tokens : List Token) =>
+  case fuel as guard in Fuel return Worked Stepper with
+  | fuelEnd => workError (firstPosition tokens) eFuel
+  | fuelMore more => (
+    case tokens as self in List return Worked Stepper with
+    | nil => workError 0 eStep
+    | cons head tail => (
+      case head as token in Token return Worked Stepper with
+      | numberToken position number => workError position eStep
+      | stringToken position text => workError position eStep
+      | punctuation position mark => (
+        case (natEq mark 40) as opening return Worked Stepper with
+        | 0 (x : prod ()) => workError position eStep
+        | 1 (x : prod ()) => stepperTerm more budget mode expected environment tokens)
+      | identifier position name => (
+        case (natEq (sameText name sfun) 1) as lambda return Worked Stepper with
+        | 1 (x : prod ()) => inlineStepper more budget mode expected environment tail
+        | 0 (x : prod ()) => (
+        case (lookup name environment) as found in Option return Worked Stepper with
+        | none => workError position eStep
+        | some item => (
+          case item as known in Binding return Worked Stepper with
+          | binding other ty value => workError position eStep
+          | typeBinding other universe defined => workError position eStep
+          | arrowBinding other params result => workError position eStep
+          | funBinding other params result body => boundStepper more budget position name params result environment tail
+          | closureBinding other params result body captured => boundStepper more budget position name params result environment tail)))))
+-- fun (x : A) .. => body inside the parentheses of fold or unfold. The body
+-- is checked once against the result type of the form, with each binder
+-- bound to null. The function keeps the scope of the form. The form checks
+-- the binders against its source or its seed.
+and inlineStepper : Fuel -> Nat -> Nat -> LType -> List Binding -> List Token -> Worked Stepper :=
+  fun (fuel : Fuel) (budget : Nat) (mode : Nat) (expected : LType) (environment : List Binding) (tokens : List Token) =>
+  case fuel as guard in Fuel return Worked Stepper with
+  | fuelEnd => workError (firstPosition tokens) eFuel
+  | fuelMore more => (
+    case (inlineBinders more environment nil tokens) as binders in Parsed return Worked Stepper with
+    | parseError spot message => workError spot message
+    | parsed params body => (
+      case (parseTerm more budget 0 (inlineResult mode expected params) (bindParams params nil (cons checkMarker environment)) body) as checked in Worked return Worked Stepper with
+      | workError spot message => workError spot message
+      | worked value rest budget => worked
+          (stepper params (inlineResult mode expected params) (takeCount Token Token (dropCount Token Token rest body) body) environment)
+          rest budget))
+-- The bound arguments are checked in the caller scope, one per parameter,
+-- up to the closing parenthesis. A bound function argument is a name
+-- or an inline function.
+and boundStepper : Fuel -> Nat -> Nat -> Text -> List Param -> LType -> List Binding -> List Token -> Worked Stepper :=
+  fun (fuel : Fuel) (budget : Nat) (position : Nat) (name : Text) (params : List Param) (result : LType) (environment : List Binding) (tokens : List Token) =>
+  case fuel as guard in Fuel return Worked Stepper with
+  | fuelEnd => workError position eFuel
+  | fuelMore more => (
+    case (typeArguments more params environment nil tokens) as instantiated in Parsed return Worked Stepper with
+    | parseError at message => workError at message
+    | parsed chosen afterTypes => (
+      case (boundArguments more budget (valueParams chosen params) environment afterTypes) as checked in Worked return Worked Stepper with
+      | workError at message => workError at message
+      | worked values rest budget => (
+        case (natEq (boundFunctions (takeCount Value Param values (valueParams chosen params)) values) 0) as nested return Worked Stepper with
+        | 1 (x : prod ()) => workError position eTerm
+        | 0 (x : prod ()) => (
+          case (partialClosure name (arrowType (dropCount Value Param values (valueParams chosen params)) (substType chosen result)) name (typedBound params tokens afterTypes values) environment) as made in Binding return Worked Stepper with
+          | binding other ty value => workError position eStep
+          | typeBinding other universe defined => workError position eStep
+          | arrowBinding other given target => workError position eStep
+          | funBinding other given target body => worked (stepper given target body (definitionScope other environment)) rest budget
+          | closureBinding other given target body scope => worked (stepper given target body (scopeList scope)) rest budget))))
+-- One bound argument per parameter, until the closing parenthesis or the
+-- last parameter.
+and boundArguments : Fuel -> Nat -> List Param -> List Binding -> List Token -> Worked (List Value) :=
+  fun (fuel : Fuel) (budget : Nat) (params : List Param) (environment : List Binding) (tokens : List Token) =>
+  case fuel as guard in Fuel return Worked (List Value) with
+  | fuelEnd => workError (firstPosition tokens) eFuel
+  | fuelMore more => (
+    case params as self in List return Worked (List Value) with
+    | nil => worked nil tokens budget
+    | cons first others => (
+      case (natEq (closesNext tokens) 1) as closing return Worked (List Value) with
+      | 1 (x : prod ()) => worked nil tokens budget
+      | 0 (x : prod ()) => (
+        case (parseArguments more budget 1 (paramTypes (cons first nil)) environment tokens) as checked in Worked return Worked (List Value) with
+        | workError at message => workError at message
+        | worked values rest budget => (
+          case (boundArguments more budget others environment rest) as remaining in Worked return Worked (List Value) with
+          | workError at message => workError at message
+          | worked later after budget => worked (reverseListOnto Value later (reverseListOnto Value nil values)) after budget))))
+-- pure x lifts x. map, bind and filter name or partially apply a function,
+-- then take the source as an argument. In the check of a function body,
+-- map, bind and filter check the function and the source and give null.
+and structureTerm : Fuel -> Nat -> Nat -> Nat -> Nat -> LType -> List Binding -> List Token -> Worked Value :=
+  fun (fuel : Fuel) (budget : Nat) (position : Nat) (form : Nat) (atom : Nat) (expected : LType) (environment : List Binding) (tokens : List Token) =>
+  case fuel as guard in Fuel return Worked Value with
+  | fuelEnd => workError position eFuel
+  | fuelMore more => (
+    case (natEq atom 1) as bare return Worked Value with
+    | 1 (x : prod ()) => workError position eParen
+    | 0 (x : prod ()) => (
+      case (natEq (shapeCode form expected) 0) as shapeless return Worked Value with
+      | 1 (x : prod ()) => workError position eStructure
+      | 0 (x : prod ()) => (
+        case (natEq form 1) as lifting return Worked Value with
+        | 1 (x : prod ()) => (
+            case (parseTerm more budget 1 (shapeElement expected) environment tokens) as lifted in Worked return Worked Value with
+            | workError at message => workError at message
+            | worked value rest budget => worked (pureValue expected value) rest budget)
+        | 0 (x : prod ()) => (
+          case (unaryTerm more budget (structureResult form expected) environment tokens) as named in Worked return Worked Value with
+          | workError at message => workError at message
+          | worked op afterFunction budget => (
+            case (natEq (structureFits form expected op) 1) as fits return Worked Value with
+            | 0 (x : prod ()) => workError (firstPosition tokens) eTerm
+            | 1 (x : prod ()) => (
+              case (parseTerm more budget 1 (structureSource form expected op) environment afterFunction) as argument in Worked return Worked Value with
+              | workError at message => workError at message
+              | worked source rest budget => (
+                case (natEq (checkingBody environment) 1) as marked return Worked Value with
+                | 1 (x : prod ()) => worked valueNull rest budget
+                | 0 (x : prod ()) => (
+                  case (natEq (carrierCode expected) 2) as listed return Worked Value with
+                  | 1 (x : prod ()) => (
+                      case (mapItems more budget position form op (sequenceElements source)) as mapped in Worked return Worked Value with
+                      | workError at message => workError at message
+                      | worked items ignored budget => (
+                          case (rebuild expected items) as rebuilt in Result return Worked Value with
+                          | failure at message => workError position message
+                          | success value => worked value rest budget))
+                  | 0 (x : prod ()) => (
+                      case (payloadOf expected (unaryParam op) source) as payload in Option return Worked Value with
+                      | none => worked source rest budget
+                      | some item => (
+                          case (parseTerm more (natSub budget 1) 0 (unaryResult op) (unaryEnvironment op item) (unaryBody op)) as applied in Worked return Worked Value with
+                          | workError at message => workError at message
+                          | worked value after budget => worked (stepOne form expected source value) rest budget))))))))))
+-- Over a list, the function applies to each item in order: 2 map keeps
+-- each result, 3 bind joins the result lists, 4 filter keeps the items with
+-- the result flagYes. Each item uses one step of the depth fuel.
+and mapItems : Fuel -> Nat -> Nat -> Nat -> Unary -> Values -> Worked Values :=
+  fun (fuel : Fuel) (budget : Nat) (position : Nat) (form : Nat) (op : Unary) (items : Values) =>
+  case fuel as guard in Fuel return Worked Values with
+  | fuelEnd => workError position eFuel
+  | fuelMore more => (
+    case items as self in Values return Worked Values with
+    | valuesEnd => worked valuesEnd nil budget
+    | valuesItem item rest => (
+        case (parseTerm more (natSub budget 1) 0 (unaryResult op) (unaryEnvironment op item) (unaryBody op)) as applied in Worked return Worked Values with
+        | workError at message => workError at message
+        | worked value after budget => (
+            case (mapItems more budget position form op rest) as remaining in Worked return Worked Values with
+            | workError at message => workError at message
+            | worked values ignored budget => worked (stepItems form item value values) nil budget)))
+-- either f g s applies f to the payload of inl and g to the payload of inr.
+-- The two functions must have the same result type.
+and eitherTerm : Fuel -> Nat -> Nat -> List Binding -> List Token -> Worked Typed :=
+  fun (fuel : Fuel) (budget : Nat) (position : Nat) (environment : List Binding) (tokens : List Token) =>
+  case fuel as guard in Fuel return Worked Typed with
+  | fuelEnd => workError position eFuel
+  | fuelMore more => (
+    case (unaryArgument environment tokens) as left in Parsed return Worked Typed with
+    | parseError at message => workError at message
+    | parsed onLeft afterLeft => (
+      case (unaryArgument environment afterLeft) as right in Parsed return Worked Typed with
+      | parseError at message => workError at message
+      | parsed onRight afterRight => (
+        case (natEq (sameType (unaryResult onLeft) (unaryResult onRight)) 1) as agree return Worked Typed with
+        | 0 (x : prod ()) => workError (firstPosition afterLeft) eTerm
+        | 1 (x : prod ()) => (
+          case (parseTerm more budget 1 (tySum (unaryParam onLeft) (unaryParam onRight)) environment afterRight) as scrutinee in Worked return Worked Typed with
+          | workError at message => workError at message
+          | worked source rest budget => (
+            case (natEq (checkingBody environment) 1) as marked return Worked Typed with
+            | 1 (x : prod ()) => worked (typed (unaryResult onLeft) valueNull) rest budget
+            | 0 (x : prod ()) => (
+              case (parseTerm more (natSub budget 1) 0 (unaryResult onLeft)
+                  (unaryEnvironment (select Unary (sumLeft source) onLeft onRight) (projectValue 1 source))
+                  (unaryBody (select Unary (sumLeft source) onLeft onRight))) as applied in Worked return Worked Typed with
+              | workError at message => workError at message
+              | worked value after budget => worked (typed (unaryResult onLeft) value) rest budget))))))
+-- fold f z t synthesizes the type of t. Over a sequence it applies f from the
+-- last element: fold f z nil is z, and fold f z (cons x xs) is
+-- f x (fold f z xs). Over the number n it applies f n times to z. With five
+-- functions the source is a Value.
+and foldTerm : Fuel -> Nat -> Nat -> Nat -> LType -> List Binding -> List Token -> Worked Value :=
+  fun (fuel : Fuel) (budget : Nat) (position : Nat) (atom : Nat) (expected : LType) (environment : List Binding) (tokens : List Token) =>
+  case fuel as guard in Fuel return Worked Value with
+  | fuelEnd => workError position eFuel
+  | fuelMore more => (
+    case (natEq atom 1) as bare return Worked Value with
+    | 1 (x : prod ()) => workError position eParen
+    | 0 (x : prod ()) => (
+      case (stepperTerm more budget 0 expected environment tokens) as named in Worked return Worked Value with
+      | workError at message => workError at message
+      | worked op afterFunction budget => (
+        case (natEq (secondFunction more budget expected environment afterFunction) 1) as several return Worked Value with
+        | 1 (x : prod ()) => foldValueTerm more budget position (firstPosition tokens) expected op environment afterFunction
+        | 0 (x : prod ()) => (
+        case (parseTerm more budget 1 expected environment afterFunction) as initial in Worked return Worked Value with
+        | workError at message => workError at message
+        | worked start afterStart budget => (
+          case (synthTerm more budget 1 environment afterStart) as source in Worked return Worked Value with
+          | workError at message => workError at message
+          | worked found rest budget => (
+            case found as item in Typed return Worked Value with
+            | typed ty value => (
+              case (natEq (carrierCode ty) 0) as carried return Worked Value with
+              | 1 (x : prod ()) => workError (firstPosition afterStart) (select Text (sameType ty tyValue) eCases eStructure)
+              | 0 (x : prod ()) => (
+                case (natEq (foldFits ty expected op) 1) as fits return Worked Value with
+                | 0 (x : prod ()) => workError (firstPosition tokens) eTerm
+                | 1 (x : prod ()) => (
+                  case (natEq (checkingBody environment) 1) as marked return Worked Value with
+                  | 1 (x : prod ()) => worked valueNull rest budget
+                  | 0 (x : prod ()) => (
+                    case (elementsOf more value) as elements in Option return Worked Value with
+                    | none => workError position eFuel
+                    | some items => (
+                      case (foldItems more budget position op (carrierCode ty) items start) as folded in Worked return Worked Value with
+                      | workError at message => workError at message
+                      | worked result ignored budget => worked result rest budget)))))))))))
+-- Each element uses one step of the depth fuel. Over Nat (code 1) the
+-- function takes only the accumulator.
+and foldItems : Fuel -> Nat -> Nat -> Stepper -> Nat -> Values -> Value -> Worked Value :=
+  fun (fuel : Fuel) (budget : Nat) (position : Nat) (op : Stepper) (code : Nat) (items : Values) (start : Value) =>
+  case fuel as guard in Fuel return Worked Value with
+  | fuelEnd => workError position eFuel
+  | fuelMore more => (
+    case items as self in Values return Worked Value with
+    | valuesEnd => worked start nil budget
+    | valuesItem item rest => (
+        case (foldItems more budget position op code rest start) as inner in Worked return Worked Value with
+        | workError at message => workError at message
+        | worked acc ignored budget => parseTerm more (natSub budget 1) 0 (stepperResult op)
+            (stepperEnvironment op (select (List Value) (numberEq code 1) (cons acc nil) (cons item (cons acc nil))))
+            (stepperBody op)))
+-- unfold g n s checks against a carrier. It applies g to the seed s until g
+-- gives none or n elements exist.
+and unfoldTerm : Fuel -> Nat -> Nat -> Nat -> LType -> List Binding -> List Token -> Worked Value :=
+  fun (fuel : Fuel) (budget : Nat) (position : Nat) (atom : Nat) (expected : LType) (environment : List Binding) (tokens : List Token) =>
+  case fuel as guard in Fuel return Worked Value with
+  | fuelEnd => workError position eFuel
+  | fuelMore more => (
+    case (natEq atom 1) as bare return Worked Value with
+    | 1 (x : prod ()) => workError position eParen
+    | 0 (x : prod ()) => (
+      case (natEq (carrierCode expected) 0) as carried return Worked Value with
+      | 1 (x : prod ()) => (
+          case (natEq (sameType expected tyValue) 1) as tree return Worked Value with
+          | 1 (x : prod ()) => unfoldValueTerm more budget position environment tokens
+          | 0 (x : prod ()) => workError position eStructure)
+      | 0 (x : prod ()) => (
+        case (stepperTerm more budget 1 expected environment tokens) as named in Worked return Worked Value with
+        | workError at message => workError at message
+        | worked op afterFunction budget => (
+          case (natEq (unfoldFits expected op) 1) as fits return Worked Value with
+          | 0 (x : prod ()) => workError (firstPosition tokens) eTerm
+          | 1 (x : prod ()) => (
+            case (parseTerm more budget 1 tyNat environment afterFunction) as bounded in Worked return Worked Value with
+            | workError at message => workError at message
+            | worked limit afterLimit budget => (
+              case (parseTerm more budget 1 (unfoldSeed op) environment afterLimit) as seeded in Worked return Worked Value with
+              | workError at message => workError at message
+              | worked seed rest budget => (
+                case (natEq (checkingBody environment) 1) as marked return Worked Value with
+                | 1 (x : prod ()) => worked valueNull rest budget
+                | 0 (x : prod ()) => (
+                  case (unfoldItems more budget position op (carrierCode expected) (countOf limit) seed) as built in Worked return Worked Value with
+                  | workError at message => workError at message
+                  | worked items ignored budget => (
+                    case (rebuild expected items) as rebuilt in Result return Worked Value with
+                    | failure at message => workError position message
+                    | success result => worked result rest budget)))))))))
+-- Each element uses one step of the depth fuel. Into Nat (code 1) the payload
+-- of g is the next seed. Otherwise it is the pair of the element and the
+-- next seed.
+and unfoldItems : Fuel -> Nat -> Nat -> Stepper -> Nat -> Nat -> Value -> Worked Values :=
+  fun (fuel : Fuel) (budget : Nat) (position : Nat) (op : Stepper) (code : Nat) (limit : Nat) (seed : Value) =>
+  case fuel as guard in Fuel return Worked Values with
+  | fuelEnd => workError position eFuel
+  | fuelMore more => (
+    case (natEq limit 0) as done return Worked Values with
+    | 1 (x : prod ()) => worked valuesEnd nil budget
+    | 0 (x : prod ()) => (
+      case (parseTerm more (natSub budget 1) 0 (stepperResult op) (stepperEnvironment op (cons seed nil)) (stepperBody op)) as applied in Worked return Worked Values with
+      | workError at message => workError at message
+      | worked result after budget => (
+        case (payloadOf (stepperResult op) (shapeElement (stepperResult op)) result) as next in Option return Worked Values with
+        | none => worked valuesEnd nil budget
+        | some payload => (
+          case (unfoldItems more budget position op code (natSub limit 1)
+              (select Value (numberEq code 1) payload (projectValue 2 payload))) as remaining in Worked return Worked Values with
+          | workError at message => workError at message
+          | worked items ignored budget => worked (valuesItem (select Value (numberEq code 1) valueNull (projectValue 1 payload)) items) nil budget))))
+-- One of the five functions of a fold over Value is a name or a partial
+-- application. Its parameter is the payload of its constructor and its
+-- result is the declared type.
+and algebraTerm : Fuel -> Nat -> Nat -> LType -> List Binding -> List Token -> Worked Stepper :=
+  fun (fuel : Fuel) (budget : Nat) (index : Nat) (result : LType) (environment : List Binding) (tokens : List Token) =>
+  case fuel as guard in Fuel return Worked Stepper with
+  | fuelEnd => workError (firstPosition tokens) eFuel
+  | fuelMore more => (
+    case (stepperTerm more budget 0 result environment tokens) as named in Worked return Worked Stepper with
+    | workError at message => workError at message
+    | worked op rest budget => select (Worked Stepper)
+        (boolAnd (sameType (stepperResult op) result)
+          (sameTypes (paramTypes (stepperParams op)) (cons (algebraParam index result) nil)))
+        (worked op rest budget) (workError (firstPosition tokens) eTerm))
+-- The remaining four functions of a fold over Value. The first function
+-- has already been parsed and checked by foldValueTerm.
+and algebraTerms : Fuel -> Nat -> LType -> Stepper -> List Binding -> List Token -> Worked ValueAlgebra :=
+  fun (fuel : Fuel) (budget : Nat) (result : LType) (onNat : Stepper) (environment : List Binding) (tokens : List Token) =>
+  case fuel as guard in Fuel return Worked ValueAlgebra with
+  | fuelEnd => workError (firstPosition tokens) eFuel
+  | fuelMore more => (
+      case (algebraTerm more budget 2 result environment tokens) as second in Worked return Worked ValueAlgebra with
+      | workError at message => workError at message
+      | worked onFlag afterFlag budget => (
+        case (algebraTerm more budget 3 result environment afterFlag) as third in Worked return Worked ValueAlgebra with
+        | workError at message => workError at message
+        | worked onText afterText budget => (
+          case (algebraTerm more budget 4 result environment afterText) as fourth in Worked return Worked ValueAlgebra with
+          | workError at message => workError at message
+          | worked onItems afterItems budget => (
+            case (algebraTerm more budget 5 result environment afterItems) as fifth in Worked return Worked ValueAlgebra with
+            | workError at message => workError at message
+            | worked onAttrs rest budget => worked (valueAlgebra onNat onFlag onText onItems onAttrs) rest budget))))
+-- A second function after the first selects the fold over Value. A name
+-- selects it, as the initial value is never the bare name of a function. A
+-- partial application selects it only when it fits the Flag position, as a
+-- parenthesized initial value also starts with an opening parenthesis.
+and secondFunction : Fuel -> Nat -> LType -> List Binding -> List Token -> Nat :=
+  fun (fuel : Fuel) (budget : Nat) (result : LType) (environment : List Binding) (tokens : List Token) =>
+  case fuel as guard in Fuel return Nat with
+  | fuelEnd => 0
+  | fuelMore more => (
+    case (natEq (namesFunction environment tokens) 1) as named return Nat with
+    | 1 (x : prod ()) => 1
+    | 0 (x : prod ()) => (
+      case (algebraTerm more budget 2 result environment tokens) as partial in Worked return Nat with
+      | workError at message => 0
+      | worked op rest budget => 1))
+-- A fold over Value takes five functions before z. Each function is checked
+-- against the declared type before the source is read.
+and foldValueTerm : Fuel -> Nat -> Nat -> Nat -> LType -> Stepper -> List Binding -> List Token -> Worked Value :=
+  fun (fuel : Fuel) (budget : Nat) (position : Nat) (functionPosition : Nat) (expected : LType) (onNat : Stepper) (environment : List Binding) (tokens : List Token) =>
+  case fuel as guard in Fuel return Worked Value with
+  | fuelEnd => workError position eFuel
+  | fuelMore more => (
+    case (natEq (boolAnd (sameType (stepperResult onNat) expected)
+      (sameTypes (paramTypes (stepperParams onNat)) (cons tyNat nil))) 1) as fits return Worked Value with
+    | 0 (x : prod ()) => workError functionPosition eTerm
+    | 1 (x : prod ()) => (
+    case (algebraTerms more budget expected onNat environment tokens) as named in Worked return Worked Value with
+    | workError at message => workError at message
+    | worked ops afterFunctions budget => (
+      case (parseTerm more budget 1 expected environment afterFunctions) as initial in Worked return Worked Value with
+      | workError at message => workError at message
+      | worked start afterStart budget => (
+        case (synthTerm more budget 1 environment afterStart) as source in Worked return Worked Value with
+        | workError at message => workError at message
+        | worked found rest budget => (
+          case found as item in Typed return Worked Value with
+          | typed ty value => (
+            case (natEq (sameType ty tyValue) 1) as carried return Worked Value with
+            | 0 (x : prod ()) => workError (firstPosition afterStart) eCases
+            | 1 (x : prod ()) => (
+              case (natEq (checkingBody environment) 1) as marked return Worked Value with
+              | 1 (x : prod ()) => worked valueNull rest budget
+              | 0 (x : prod ()) => (
+                case (foldValue more budget position ops start value) as folded in Worked return Worked Value with
+                | workError at message => workError at message
+                | worked result ignored budget => worked result rest budget))))))))
+-- valueNull gives z. A scalar applies its function to the payload. Items and
+-- fields fold each child first, in order, and then apply their function to
+-- the list of the results. Each node and each child uses one step of the
+-- depth fuel.
+and foldValue : Fuel -> Nat -> Nat -> ValueAlgebra -> Value -> Value -> Worked Value :=
+  fun (fuel : Fuel) (budget : Nat) (position : Nat) (ops : ValueAlgebra) (start : Value) (value : Value) =>
+  case fuel as guard in Fuel return Worked Value with
+  | fuelEnd => workError position eFuel
+  | fuelMore more => (
+    case (natEq (valueIndex value) 0) as empty return Worked Value with
+    | 1 (x : prod ()) => worked start nil budget
+    | 0 (x : prod ()) => (
+      case (foldChildren more budget position ops start (numberEq (valueIndex value) 5) (childElements value)) as inner in Worked return Worked Value with
+      | workError at message => workError at message
+      | worked results ignored budget => parseTerm more (natSub budget 1) 0 (stepperResult (algebraStep (valueIndex value) ops))
+          (stepperEnvironment (algebraStep (valueIndex value) ops) (cons (algebraInput value results) nil))
+          (stepperBody (algebraStep (valueIndex value) ops))))
+-- A child of the fields (keyed = 1) is the pair of its key and its value.
+-- Its result is the pair of the key and the folded value.
+and foldChildren : Fuel -> Nat -> Nat -> ValueAlgebra -> Value -> Nat -> Values -> Worked Values :=
+  fun (fuel : Fuel) (budget : Nat) (position : Nat) (ops : ValueAlgebra) (start : Value) (keyed : Nat) (elements : Values) =>
+  case fuel as guard in Fuel return Worked Values with
+  | fuelEnd => workError position eFuel
+  | fuelMore more => (
+    case elements as self in Values return Worked Values with
+    | valuesEnd => worked valuesEnd nil budget
+    | valuesItem head rest => (
+        case (foldValue more budget position ops start (select Value keyed (projectValue 2 head) head)) as first in Worked return Worked Values with
+        | workError at message => workError at message
+        | worked result ignored budget => (
+            case (foldChildren more budget position ops start keyed rest) as remaining in Worked return Worked Values with
+            | workError at message => workError at message
+            | worked results unused budget => worked (valuesItem
+                (select Value keyed (objectTwo kFirst (projectValue 1 head) kSecond result) result) results) nil budget)))
+-- unfold g n s into Value. g gives the layer of a seed. unfold applies g to
+-- the seeds in depth-first order, at most n times. A seed that is left after
+-- n applications becomes valueNull.
+and unfoldValueTerm : Fuel -> Nat -> Nat -> List Binding -> List Token -> Worked Value :=
+  fun (fuel : Fuel) (budget : Nat) (position : Nat) (environment : List Binding) (tokens : List Token) =>
+  case fuel as guard in Fuel return Worked Value with
+  | fuelEnd => workError position eFuel
+  | fuelMore more => (
+    case (stepperTerm more budget 2 tyValue environment tokens) as named in Worked return Worked Value with
+    | workError at message => workError at message
+    | worked op afterFunction budget => (
+      case (natEq (unfoldValueFits op) 1) as fits return Worked Value with
+      | 0 (x : prod ()) => workError (firstPosition tokens) eTerm
+      | 1 (x : prod ()) => (
+        case (parseTerm more budget 1 tyNat environment afterFunction) as bounded in Worked return Worked Value with
+        | workError at message => workError at message
+        | worked limit afterLimit budget => (
+          case (parseTerm more budget 1 (unfoldSeed op) environment afterLimit) as seeded in Worked return Worked Value with
+          | workError at message => workError at message
+          | worked seed rest budget => (
+            case (natEq (checkingBody environment) 1) as marked return Worked Value with
+            | 1 (x : prod ()) => worked valueNull rest budget
+            | 0 (x : prod ()) => (
+              case (unfoldNode more budget position op (countOf limit) seed) as built in Worked return Worked Value with
+              | workError at message => workError at message
+              | worked node ignored budget => worked (grownHead node) rest budget))))))
+-- Each application of g uses one step of the depth fuel and one of the n
+-- applications. Duplicate keys of the fields are an error at unfold.
+and unfoldNode : Fuel -> Nat -> Nat -> Stepper -> Nat -> Value -> Worked Grown :=
+  fun (fuel : Fuel) (budget : Nat) (position : Nat) (op : Stepper) (limit : Nat) (seed : Value) =>
+  case fuel as guard in Fuel return Worked Grown with
+  | fuelEnd => workError position eFuel
+  | fuelMore more => (
+    case (natEq limit 0) as done return Worked Grown with
+    | 1 (x : prod ()) => worked (grownLeaf valueNull 0) nil budget
+    | 0 (x : prod ()) => (
+      case (parseTerm more (natSub budget 1) 0 (stepperResult op) (stepperEnvironment op (cons seed nil)) (stepperBody op)) as applied in Worked return Worked Grown with
+      | workError at message => workError at message
+      | worked layer after budget => (
+        case (natLt (layerIndex layer) 4) as leaf return Worked Grown with
+        | 1 (x : prod ()) => worked (grownLeaf (layerPayload layer) (natSub limit 1)) nil budget
+        | 0 (x : prod ()) => (
+          case (unfoldSeeds more budget position op (numberEq (layerIndex layer) 5) (natSub limit 1) (itemsOf (layerPayload layer))) as children in Worked return Worked Grown with
+          | workError at message => workError at message
+          | worked built ignored budget => (
+            case (natEq (layerIndex layer) 5) as fielded return Worked Grown with
+            | 0 (x : prod ()) => worked (grownLeaf (valueItems (grownItems built)) (grownLimit built)) nil budget
+            | 1 (x : prod ()) => (
+              case (fieldsOf (grownItems built)) as attrs in Result return Worked Grown with
+              | failure at message => workError position message
+              | success fields => worked (grownLeaf (valueAttrs fields) (grownLimit built)) nil budget))))))
+-- The seeds of the items, or the keys and seeds of the fields (keyed = 1),
+-- from the left. The applications that remain pass from each seed to the
+-- next seed.
+and unfoldSeeds : Fuel -> Nat -> Nat -> Stepper -> Nat -> Nat -> Values -> Worked Grown :=
+  fun (fuel : Fuel) (budget : Nat) (position : Nat) (op : Stepper) (keyed : Nat) (limit : Nat) (seeds : Values) =>
+  case fuel as guard in Fuel return Worked Grown with
+  | fuelEnd => workError position eFuel
+  | fuelMore more => (
+    case seeds as self in Values return Worked Grown with
+    | valuesEnd => worked (grown valuesEnd limit) nil budget
+    | valuesItem head rest => (
+        case (unfoldNode more budget position op limit (select Value keyed (projectValue 2 head) head)) as first in Worked return Worked Grown with
+        | workError at message => workError at message
+        | worked node ignored budget => (
+            case (unfoldSeeds more budget position op keyed (grownLimit node) rest) as remaining in Worked return Worked Grown with
+            | workError at message => workError at message
+            | worked others unused budget => worked (grown (valuesItem
+                (select Value keyed (objectTwo kFirst (projectValue 1 head) kSecond (grownHead node)) (grownHead node))
+                (grownItems others)) (grownLimit others)) nil budget)))

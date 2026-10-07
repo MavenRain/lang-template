@@ -1,0 +1,68 @@
+-- Plan tables of the sample domain. They mirror domain/schema.mech: one
+-- plan for each constructor, with its argument types, field names and tag.
+-- Replace them together with domain/schema.mech. The core calls only
+-- domainConstructorPlan, domainType and domainReservedName (domain/README.md).
+
+def domainTextMeasure : Text := textByte 77 (textByte 101 (textByte 97 (textByte 115 (textByte 117 (textByte 114 (textByte 101 (textEnd)))))))
+def domainTextItem : Text := textByte 73 (textByte 116 (textByte 101 (textByte 109 (textEnd))))
+def domainTextStock : Text := textByte 83 (textByte 116 (textByte 111 (textByte 99 (textByte 107 (textEnd)))))
+def domainTextmeasurePiece : Text := textByte 109 (textByte 101 (textByte 97 (textByte 115 (textByte 117 (textByte 114 (textByte 101 (textByte 80 (textByte 105 (textByte 101 (textByte 99 (textByte 101 (textEnd))))))))))))
+def domainTextmeasureBox : Text := textByte 109 (textByte 101 (textByte 97 (textByte 115 (textByte 117 (textByte 114 (textByte 101 (textByte 66 (textByte 111 (textByte 120 (textEnd))))))))))
+def domainTextmakeItem : Text := textByte 109 (textByte 97 (textByte 107 (textByte 101 (textByte 73 (textByte 116 (textByte 101 (textByte 109 (textEnd))))))))
+def domainTextmakeStock : Text := textByte 109 (textByte 97 (textByte 107 (textByte 101 (textByte 83 (textByte 116 (textByte 111 (textByte 99 (textByte 107 (textEnd)))))))))
+def domainTextname : Text := textByte 110 (textByte 97 (textByte 109 (textByte 101 (textEnd))))
+def domainTextmeasure : Text := textByte 109 (textByte 101 (textByte 97 (textByte 115 (textByte 117 (textByte 114 (textByte 101 (textEnd)))))))
+def domainTextitem : Text := textByte 105 (textByte 116 (textByte 101 (textByte 109 (textEnd))))
+def domainTextcount : Text := textByte 99 (textByte 111 (textByte 117 (textByte 110 (textByte 116 (textEnd)))))
+
+def domainMeasurePlan : Text -> Option Plan := fun (name : Text) =>
+  (case (natEq (sameText name domainTextmeasurePiece) 1) as matched return Option Plan with
+    | 1 (x : prod ()) => some (plan nil 14 domainTextmeasurePiece)
+    | 0 (x : prod ()) => (case (natEq (sameText name domainTextmeasureBox) 1) as matched return Option Plan with
+    | 1 (x : prod ()) => some (plan nil 14 domainTextmeasureBox)
+    | 0 (x : prod ()) => none))
+
+def domainItemPlan : Text -> Option Plan := fun (name : Text) =>
+  (case (natEq (sameText name domainTextmakeItem) 1) as matched return Option Plan with
+    | 1 (x : prod ()) => some (recordPlan (cons tyText (cons (tyNamed domainTextMeasure) nil)) (cons domainTextname (cons domainTextmeasure nil)) none)
+    | 0 (x : prod ()) => none)
+
+def domainStockPlan : Text -> Option Plan := fun (name : Text) =>
+  (case (natEq (sameText name domainTextmakeStock) 1) as matched return Option Plan with
+    | 1 (x : prod ()) => some (recordPlan (cons (tyNamed domainTextItem) (cons tyNat nil)) (cons domainTextitem (cons domainTextcount nil)) none)
+    | 0 (x : prod ()) => none)
+
+def domainConstructorPlan : Text -> Text -> Option Plan := fun (family : Text) (name : Text) =>
+  (case (natEq (sameText family domainTextMeasure) 1) as matched return Option Plan with
+    | 1 (x : prod ()) => domainMeasurePlan name
+    | 0 (x : prod ()) => (case (natEq (sameText family domainTextItem) 1) as matched return Option Plan with
+    | 1 (x : prod ()) => domainItemPlan name
+    | 0 (x : prod ()) => (case (natEq (sameText family domainTextStock) 1) as matched return Option Plan with
+    | 1 (x : prod ()) => domainStockPlan name
+    | 0 (x : prod ()) => none)))
+
+def domainType : Text -> Option LType := fun (name : Text) =>
+  (case (natEq (sameText name domainTextMeasure) 1) as matched return Option LType with
+    | 1 (x : prod ()) => some (tyNamed domainTextMeasure)
+    | 0 (x : prod ()) => (case (natEq (sameText name domainTextItem) 1) as matched return Option LType with
+    | 1 (x : prod ()) => some (tyNamed domainTextItem)
+    | 0 (x : prod ()) => (case (natEq (sameText name domainTextStock) 1) as matched return Option LType with
+    | 1 (x : prod ()) => some (tyNamed domainTextStock)
+    | 0 (x : prod ()) => none)))
+
+def domainReservedName : Text -> Nat := fun (name : Text) =>
+  (case (natEq (sameText name domainTextMeasure) 1) as matched return Nat with
+    | 1 (x : prod ()) => 1
+    | 0 (x : prod ()) => (case (natEq (sameText name domainTextItem) 1) as matched return Nat with
+    | 1 (x : prod ()) => 1
+    | 0 (x : prod ()) => (case (natEq (sameText name domainTextStock) 1) as matched return Nat with
+    | 1 (x : prod ()) => 1
+    | 0 (x : prod ()) => (case (natEq (sameText name domainTextmeasurePiece) 1) as matched return Nat with
+    | 1 (x : prod ()) => 1
+    | 0 (x : prod ()) => (case (natEq (sameText name domainTextmeasureBox) 1) as matched return Nat with
+    | 1 (x : prod ()) => 1
+    | 0 (x : prod ()) => (case (natEq (sameText name domainTextmakeItem) 1) as matched return Nat with
+    | 1 (x : prod ()) => 1
+    | 0 (x : prod ()) => (case (natEq (sameText name domainTextmakeStock) 1) as matched return Nat with
+    | 1 (x : prod ()) => 1
+    | 0 (x : prod ()) => 0)))))))

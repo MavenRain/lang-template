@@ -1,0 +1,217 @@
+-- Internal compiler types are not exposed to source programs.
+mu Fuel : Type 0 with
+| fuelEnd : Fuel
+| fuelMore : Fuel -> Fuel
+
+mu Result (0 A : Type 0) : Type 0 with
+| success : A -> Result A
+| failure : Nat -> Text -> Result A
+
+def numberEq : Nat -> Nat -> Nat := fun (a : Nat) (b : Nat) =>
+  case (natEq a b) as verdict return Nat with
+  | 0 (x : prod ()) => 0
+  | 1 (x : prod ()) => 1
+
+def numberLt : Nat -> Nat -> Nat := fun (a : Nat) (b : Nat) =>
+  case (natLt a b) as verdict return Nat with
+  | 0 (x : prod ()) => 0
+  | 1 (x : prod ()) => 1
+
+def select : (0 A : Type 0) -> Nat -> A -> A -> A :=
+  fun (0 A : Type 0) (condition : Nat) (yes : A) (no : A) =>
+    case (natEq condition 1) as self return A with
+    | 0 (x : prod ()) => no
+    | 1 (x : prod ()) => yes
+
+def boolAnd : Nat -> Nat -> Nat := fun (a : Nat) (b : Nat) => select Nat a b 0
+def boolOr : Nat -> Nat -> Nat := fun (a : Nat) (b : Nat) => select Nat a 1 b
+def boolNot : Nat -> Nat := fun (a : Nat) => select Nat a 0 1
+def between : Nat -> Nat -> Nat -> Nat := fun (lo : Nat) (hi : Nat) (x : Nat) =>
+  boolAnd (boolNot (numberLt x lo)) (numberLt x hi)
+
+def rec reverseOnto : Text -> Text -> Text := fun (done : Text) (text : Text) =>
+  case text as self in Text return Text with
+  | textEnd => done
+  | textByte byte rest => reverseOnto (textByte byte done) rest
+
+def reverseText : Text -> Text := fun (text : Text) => reverseOnto textEnd text
+def appendText : Text -> Text -> Text := fun (a : Text) (b : Text) =>
+  reverseOnto b (reverseText a)
+
+def textIsEnd : Text -> Nat := fun (text : Text) =>
+  case text as self in Text return Nat with | textEnd => 1 | textByte byte rest => 0
+def textHead : Text -> Nat := fun (text : Text) =>
+  case text as self in Text return Nat with | textEnd => 0 | textByte byte rest => byte
+def textTail : Text -> Text := fun (text : Text) =>
+  case text as self in Text return Text with | textEnd => textEnd | textByte byte rest => rest
+
+def rec sameText : Text -> Text -> Nat := fun (b : Text) (a : Text) =>
+  case b as self in Text return Nat with
+  | textEnd => textIsEnd a
+  | textByte head tail => (
+      case a as other in Text return Nat with
+      | textEnd => 0
+      | textByte byte rest => (
+          case (natEq byte head) as same return Nat with
+          | 0 (x : prod ()) => 0
+          | 1 (x : prod ()) => sameText tail rest))
+
+def rec fuelFor : Text -> Fuel := fun (text : Text) =>
+  case text as self in Text return Fuel with
+  | textEnd => fuelMore fuelEnd
+  | textByte byte rest => fuelMore (fuelFor rest)
+
+def fuelTen : Fuel := fuelMore (fuelMore (fuelMore (fuelMore (fuelMore
+  (fuelMore (fuelMore (fuelMore (fuelMore (fuelMore fuelEnd)))))))))
+
+def rec reverseListOnto : (0 A : Type 0) -> List A -> List A -> List A :=
+  fun (0 A : Type 0) (done : List A) (items : List A) =>
+    case items as self in List return List A with
+    | nil => done
+    | cons head tail => reverseListOnto A (cons head done) tail
+
+-- UTF-8 state records the number and bounds of remaining continuation bytes.
+-- The result is the offset of the first bad byte, or of the lead byte of a
+-- sequence that the end of the text cuts short.
+def rec utf8ErrorFrom : Nat -> Nat -> Nat -> Nat -> Nat -> Text -> Option Nat :=
+  fun (position : Nat) (lead : Nat) (pending : Nat) (lo : Nat) (hi : Nat) (text : Text) =>
+    case text as self in Text return Option Nat with
+    | textEnd => select (Option Nat) (numberEq pending 0) none (some lead)
+    | textByte byte rest =>
+        case (natEq pending 0) as state return Option Nat with
+        | 0 (x : prod ()) => (
+            case (natEq (between lo hi byte) 1) as valid return Option Nat with
+            | 0 (x : prod ()) => some position
+            | 1 (x : prod ()) => utf8ErrorFrom (natAdd position 1) lead (natSub pending 1) 128 192 rest)
+        | 1 (x : prod ()) => (
+            case (natLt byte 128) as ascii return Option Nat with
+            | 1 (x : prod ()) => utf8ErrorFrom (natAdd position 1) position 0 128 192 rest
+            | 0 (x : prod ()) => (
+                case (natEq (between 194 224 byte) 1) as two return Option Nat with
+                | 1 (x : prod ()) => utf8ErrorFrom (natAdd position 1) position 1 128 192 rest
+                | 0 (x : prod ()) => (
+                    case (natEq (between 224 240 byte) 1) as three return Option Nat with
+                    | 1 (x : prod ()) => utf8ErrorFrom (natAdd position 1) position 2
+                        (select Nat (numberEq byte 224) 160 128)
+                        (select Nat (numberEq byte 237) 160 192) rest
+                    | 0 (x : prod ()) => (
+                        case (natEq (between 240 245 byte) 1) as four return Option Nat with
+                        | 0 (x : prod ()) => some position
+                        | 1 (x : prod ()) => utf8ErrorFrom (natAdd position 1) position 3
+                            (select Nat (numberEq byte 240) 144 128)
+                            (select Nat (numberEq byte 244) 144 192) rest))))
+
+def utf8Error : Text -> Option Nat := utf8ErrorFrom 0 0 0 128 192
+
+def validUtf8 : Text -> Nat := fun (text : Text) =>
+  case (utf8Error text) as found in Option return Nat with
+  | none => 1
+  | some position => 0
+
+mu LType : Type 0 with
+| tyNat : LType
+| tyText : LType
+| tyFlag : LType
+| tyValue : LType
+| tyValues : LType
+| tyAttrs : LType
+| tyNamed : Text -> LType
+| tyOption : LType -> LType
+| tyList : LType -> LType
+| tyProd : LType -> LType -> LType
+| tySum : LType -> LType -> LType
+| tyUniverse : Nat -> LType
+| tyEq : LType -> Text -> Text -> LType
+| tyArrow : LType -> LType -> LType
+
+mu Plan : Type 0 with
+| plan : List LType -> Nat -> Text -> Plan
+| recordPlan : List LType -> List Text -> Option Text -> Plan
+
+def rec fuelAppend : Fuel -> Fuel -> Fuel := fun (done : Fuel) (fuel : Fuel) =>
+  case fuel as self in Fuel return Fuel with
+  | fuelEnd => done
+  | fuelMore rest => fuelMore (fuelAppend done rest)
+
+
+mu Token : Type 0 with
+| identifier : Nat -> Text -> Token
+| numberToken : Nat -> Nat -> Token
+| stringToken : Nat -> Text -> Token
+| punctuation : Nat -> Nat -> Token
+
+def tokenPosition : Token -> Nat := fun (token : Token) =>
+  case token as self in Token return Nat with
+  | identifier position name => position
+  | numberToken position number => position
+  | stringToken position text => position
+  | punctuation position mark => position
+
+def firstPosition : List Token -> Nat := fun (tokens : List Token) =>
+  case tokens as self in List return Nat with
+  | nil => 0
+  | cons head tail => tokenPosition head
+
+mu Parsed (0 A : Type 0) : Type 0 with
+| parsed : A -> List Token -> Parsed A
+| parseError : Nat -> Text -> Parsed A
+
+mu Param : Type 0 with
+| param : Text -> LType -> Param
+
+-- A function keeps its parameters, its result type and the tokens of its
+-- checked body. Its body can only name earlier definitions and parameters.
+-- An arrow binding is the name of a function type. A closure binding is a
+-- function parameter. It keeps the parameters, the result type and the body
+-- of its function argument, with the scope of that argument.
+mu Binding : Type 0 with
+| binding : Text -> LType -> Value -> Binding
+| typeBinding : Text -> LType -> LType -> Binding
+| arrowBinding : Text -> List Param -> LType -> Binding
+| funBinding : Text -> List Param -> LType -> List Token -> Binding
+| closureBinding : Text -> List Param -> LType -> List Token -> Scope -> Binding
+and Scope : Type 0 with
+| scopeEnd : Scope
+| scopeItem : Binding -> Scope -> Scope
+
+-- A synthesized term carries its type with its value.
+mu Typed : Type 0 with
+| typed : LType -> Value -> Typed
+
+def bindingName : Binding -> Text := fun (item : Binding) =>
+  case item as self in Binding return Text with
+  | binding name ty value => name
+  | typeBinding name universe defined => name
+  | arrowBinding name params result => name
+  | funBinding name params result body => name
+  | closureBinding name params result body scope => name
+
+def rec scopeOf : List Binding -> Scope := fun (environment : List Binding) =>
+  case environment as self in List return Scope with
+  | nil => scopeEnd
+  | cons head tail => scopeItem head (scopeOf tail)
+
+def rec scopeList : Scope -> List Binding := fun (scope : Scope) =>
+  case scope as self in Scope return List Binding with
+  | scopeEnd => nil
+  | scopeItem head tail => cons head (scopeList tail)
+
+def rec lookup : Text -> List Binding -> Option Binding :=
+  fun (name : Text) (environment : List Binding) =>
+    case environment as self in List return Option Binding with
+    | nil => none
+    | cons head tail => (
+        case (natEq (sameText name (bindingName head)) 1) as found return Option Binding with
+        | 1 (x : prod ()) => some head
+        | 0 (x : prod ()) => lookup name tail)
+
+def rec hasField : Text -> Attrs -> Nat := fun (key : Text) (attrs : Attrs) =>
+  case attrs as self in Attrs return Nat with
+  | attrsEnd => 0
+  | attrsField name value rest => (
+      case (natEq (sameText key name) 1) as found return Nat with
+      | 1 (x : prod ()) => 1
+      | 0 (x : prod ()) => hasField key rest)
+
+def emptyText : Text := textEnd
+def consText : Nat -> Text -> Text := fun (byte : Nat) (rest : Text) => textByte byte rest

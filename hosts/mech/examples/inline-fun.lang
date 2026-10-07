@@ -1,0 +1,10 @@
+-- map, bind and filter can take an inline function with one binder.
+def xs : List Nat := cons 4 (cons 7 nil)
+def flags : List Flag := cons flagYes (cons flagNo (cons flagYes nil))
+def pickK : (k : Nat) -> (n : Nat) -> Nat := fun (k : Nat) (n : Nat) => k
+def wrapped : List (List Nat) := map (fun (x : Nat) => cons x nil) xs
+def doubled : List Nat := bind (fun (x : Nat) => cons x (cons x nil)) xs
+def kept : List Flag := filter (fun (b : Flag) => b) flags
+-- The body sees the parameters of the function around the form.
+def tagged : (k : Nat) -> (ys : List Nat) -> List Nat := fun (k : Nat) (ys : List Nat) => map (fun (y : Nat) => pickK k y) ys
+def nines : List Nat := tagged 9 xs

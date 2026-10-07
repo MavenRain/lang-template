@@ -1,0 +1,14 @@
+-- A partial application can bind a partial application.
+def Rule : Type 0 := (n : Nat) -> Nat
+def apply : (f : Rule) -> (n : Nat) -> Nat := fun (f : Rule) (n : Nat) => f n
+def use : (h : Rule) -> Nat := fun (h : Rule) => h 1
+def pickK : (k : Nat) -> (n : Nat) -> Nat := fun (k : Nat) (n : Nat) => k
+def six : Nat := use (apply (pickK 6))
+-- The nesting can go deeper.
+def one : Nat := use (apply (apply (fun (x : Nat) => x)))
+-- The bound arguments see the parameters around the partial application.
+def tag : (k : Nat) -> Nat := fun (k : Nat) => use (apply (pickK k))
+def nine : Nat := tag 9
+-- Structure forms take such a partial application too.
+def xs : List Nat := cons 4 (cons 7 nil)
+def twos : List Nat := map (apply (pickK 2)) xs

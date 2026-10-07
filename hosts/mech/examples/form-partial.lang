@@ -1,0 +1,13 @@
+-- A structure form can bind the leading parameters of its function.
+def Two : Type 0 := (a : Nat) -> (b : Nat) -> Nat
+def pick : (a : Nat) -> (b : Nat) -> Nat := fun (a : Nat) (b : Nat) => a
+def keep : (f : Flag) -> (n : Nat) -> Flag := fun (f : Flag) (n : Nat) => f
+def twice : (k : Nat) -> (n : Nat) -> List Nat := fun (k : Nat) (n : Nat) => cons k (cons n nil)
+def xs : List Nat := cons 4 (cons 7 nil)
+def fixed : List Nat := map (pick 1) xs
+def kept : List Nat := filter (keep flagYes) xs
+def paired : List Nat := bind (twice 0) xs
+def choose : (k : Nat) -> List Nat := fun (k : Nat) => map (pick k) xs
+def chosen : List Nat := choose 3
+def useTwo : (h : Two) -> List Nat := fun (h : Two) => map (h 5) xs
+def fives : List Nat := useTwo pick

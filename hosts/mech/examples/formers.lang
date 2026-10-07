@@ -1,0 +1,14 @@
+-- Type definitions name types. They are not instances.
+def Contact : Type 0 := Prod Text (Option Text)
+def Contacts : Type 0 := List Contact
+def Universe : Type 1 := Type 0
+def Name : Universe := Text
+
+def mira : Contact := pair "Mira" (some "mira@example.com")
+def jo : Contact := pair "Jo" none
+def team : Contacts := cons mira (cons jo nil)
+
+-- first and second project a product.
+def miraName : Name := first mira
+def joEmail : Option Text := second jo
+def names : Prod Name Name := pair (first mira) (first jo)

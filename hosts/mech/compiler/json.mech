@@ -1,0 +1,134 @@
+mu Division : Type 0 with
+| division : Nat -> Nat -> Division
+
+def rec divideDigit : Fuel -> Nat -> Nat -> Nat -> Division :=
+  fun (fuel : Fuel) (number : Nat) (place : Nat) (digit : Nat) =>
+  case fuel as guard in Fuel return Division with
+  | fuelEnd => division digit number
+  | fuelMore more => (
+      case (natLt number place) as small return Division with
+      | 1 (x : prod ()) => division digit number
+      | 0 (x : prod ()) => divideDigit more (natSub number place) place (natAdd digit 1))
+
+def decimalPlaces : List Nat := cons 1000000000 (cons 100000000 (cons 10000000
+  (cons 1000000 (cons 100000 (cons 10000 (cons 1000 (cons 100 (cons 10 (cons 1 nil)))))))))
+
+def rec decimalOnto : Nat -> Nat -> Text -> List Nat -> Text :=
+  fun (number : Nat) (started : Nat) (done : Text) (places : List Nat) =>
+  case places as self in List return Text with
+  | nil => done
+  | cons place rest => (
+      case (divideDigit fuelTen number place 0) as split in Division return Text with
+      | division digit remaining =>
+          decimalOnto remaining (boolOr started (boolNot (numberEq digit 0)))
+            (select Text (boolOr started (boolOr (boolNot (numberEq digit 0)) (numberEq place 1)))
+              (textByte (natAdd 48 digit) done) done) rest)
+
+def numberText : Nat -> Text := fun (number : Nat) =>
+  reverseText (decimalOnto number 0 textEnd decimalPlaces)
+
+def hexByte : Nat -> Nat := fun (digit : Nat) =>
+  select Nat (numberLt digit 10) (natAdd 48 digit) (natAdd 87 digit)
+
+-- The JSON form of one string byte, in output order.
+def quoteByteText : Nat -> Text := fun (byte : Nat) =>
+  case (natLt byte 32) as control return Text with
+  | 1 (x : prod ()) => (
+      case (divideDigit fuelTen byte 16 0) as split in Division return Text with
+      | division high low => textByte 92 (textByte 117 (textByte 48 (textByte 48
+          (textByte (hexByte high) (textByte (hexByte low) textEnd))))))
+  | 0 (x : prod ()) => select Text
+      (boolOr (numberEq byte 34) (numberEq byte 92))
+      (textByte 92 (textByte byte textEnd)) (textByte byte textEnd)
+
+mu Printed : Type 0 with
+| printed : Fuel -> Text -> Printed
+| printError : Nat -> Text -> Printed
+
+-- Every emitted output byte takes one unit of the output budget.
+def rec emitText : Fuel -> Text -> Text -> Printed :=
+  fun (fuel : Fuel) (done : Text) (text : Text) =>
+  case fuel as guard in Fuel return Printed with
+  | fuelEnd => (
+      case text as self in Text return Printed with
+      | textEnd => printed fuel done
+      | textByte byte rest => printError 0 eOutput)
+  | fuelMore more => (
+      case text as self in Text return Printed with
+      | textEnd => printed fuel done
+      | textByte byte rest => emitText more (textByte byte done) rest)
+
+def rec quoteBytes : Fuel -> Text -> Text -> Printed :=
+  fun (fuel : Fuel) (done : Text) (text : Text) =>
+  case text as self in Text return Printed with
+  | textEnd => emitText fuel done (textByte 34 textEnd)
+  | textByte byte rest => (
+      case (emitText fuel done (quoteByteText byte)) as step in Printed return Printed with
+      | printError at message => printError at message
+      | printed more output => quoteBytes more output rest)
+
+def quoted : Fuel -> Text -> Text -> Printed := fun (fuel : Fuel) (done : Text) (text : Text) =>
+  case (natEq (validUtf8 text) 1) as valid return Printed with
+  | 0 (x : prod ()) => printError 0 eUtf8
+  | 1 (x : prod ()) => (
+      case (emitText fuel done (textByte 34 textEnd)) as opening in Printed return Printed with
+      | printError at message => printError at message
+      | printed more output => quoteBytes more output text)
+
+def printHeader : Fuel -> Printed := fun (fuel : Fuel) =>
+  case (emitText fuel textEnd (textByte 123 textEnd)) as opening in Printed return Printed with
+  | printError at message => printError at message
+  | printed more output => (
+      case (quoted more output domainName) as name in Printed return Printed with
+      | printError at message => printError at message
+      | printed remaining header => emitText remaining header jInstances)
+
+def separator : Nat -> Text := fun (first : Nat) => select Text first textEnd (textByte 44 textEnd)
+
+-- Each recursion follows a structural child. Remaining fuel is threaded
+-- through sequential children to bound the total output, including sharing.
+def rec printValue : Fuel -> Text -> Nat -> Value -> Printed :=
+  fun (fuel : Fuel) (done : Text) (unused : Nat) (value : Value) =>
+  case value as self in Value return Printed with
+  | valueNull => emitText fuel done jNull
+  | valueNat number => emitText fuel done (numberText number)
+  | valueFlag flag => (case flag as boolean in Flag return Printed with
+      | flagNo => emitText fuel done jFalse
+      | flagYes => emitText fuel done jTrue)
+  | valueText text => quoted fuel done text
+  | valueItems items => (
+      case (emitText fuel done (textByte 91 textEnd)) as opening in Printed return Printed with
+      | printError at message => printError at message
+      | printed more output => printValues more output 1 items)
+  | valueAttrs attrs => (
+      case (emitText fuel done (textByte 123 textEnd)) as opening in Printed return Printed with
+      | printError at message => printError at message
+      | printed more output => printAttrs more output 1 attrs)
+and printValues : Fuel -> Text -> Nat -> Values -> Printed :=
+  fun (fuel : Fuel) (done : Text) (first : Nat) (values : Values) =>
+  case values as self in Values return Printed with
+  | valuesEnd => emitText fuel done (textByte 93 textEnd)
+  | valuesItem head rest => (
+      case (emitText fuel done (separator first)) as comma in Printed return Printed with
+      | printError at message => printError at message
+      | printed more output => (
+          case (printValue more output 0 head) as item in Printed return Printed with
+          | printError at message => printError at message
+          | printed remaining next => printValues remaining next 0 rest))
+and printAttrs : Fuel -> Text -> Nat -> Attrs -> Printed :=
+  fun (fuel : Fuel) (done : Text) (first : Nat) (attrs : Attrs) =>
+  case attrs as self in Attrs return Printed with
+  | attrsEnd => emitText fuel done (textByte 125 textEnd)
+  | attrsField key value rest => (
+      case (emitText fuel done (separator first)) as comma in Printed return Printed with
+      | printError at message => printError at message
+      | printed more output => (
+          case (quoted more output key) as name in Printed return Printed with
+          | printError at message => printError at message
+          | printed remaining named => (
+              case (emitText remaining named (textByte 58 textEnd)) as colon in Printed return Printed with
+              | printError at message => printError at message
+              | printed left keyed => (
+                  case (printValue left keyed 0 value) as item in Printed return Printed with
+                  | printError at message => printError at message
+                  | printed next final => printAttrs next final 0 rest))))

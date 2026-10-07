@@ -1,0 +1,2 @@
+#!/bin/sh
+exec node --stack-size=7000 --max-old-space-size=1024 "$(dirname "$0")/langc.mjs" "$@"

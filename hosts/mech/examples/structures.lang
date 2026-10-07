@@ -1,0 +1,19 @@
+-- Monad and Filterable forms over Option, List and Sum E. A structure form
+-- names a function with one parameter. The declared type selects the
+-- instance, and either synthesizes the result type of its functions.
+def twice : (n : Nat) -> List Nat := fun (n : Nat) => cons n (cons n nil)
+def tagged : (n : Nat) -> Prod Text Nat := fun (n : Nat) => pair "seen" n
+def kept : (n : Nat) -> Flag := fun (n : Nat) => flagYes
+def dropped : (n : Nat) -> Flag := fun (n : Nat) => flagNo
+def size : (label : Text) -> Nat := fun (label : Text) => 0
+def count : (n : Nat) -> Nat := fun (n : Nat) => n
+
+def counts : List Nat := cons 1 (cons 2 nil)
+def single : List Nat := pure 7
+def pairs : List (Prod Text Nat) := map tagged counts
+def doubled : List Nat := bind twice counts
+def empty : List Nat := filter dropped counts
+def every : List Nat := filter kept counts
+def found : Option (Prod Text Nat) := map tagged (some 4)
+def failed : Sum Text Nat := map count (inl "no stock")
+def settled : Nat := either size count (inr 5)

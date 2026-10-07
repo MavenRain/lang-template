@@ -1,0 +1,12 @@
+-- A function is checked once at its definition. Each application evaluates
+-- its body with the argument values. Functions are not instances.
+def tag : (label : Text) -> (count : Nat) -> Prod Text Nat :=
+  fun (label : Text) (count : Nat) => pair label count
+
+def twice : (item : Text) -> List Text :=
+  fun (item : Text) => cons item (cons item nil)
+
+def visits : Prod Text Nat := tag "acme" 3
+def names : List Text := twice (first visits)
+def total : Option Nat := some (second (tag "beta" 7))
+def counted : Eq Nat (second visits) 3 := refl

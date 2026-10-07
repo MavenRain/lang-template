@@ -1,0 +1,15 @@
+def Rule : Type 0 := (count : Nat) -> Prod Nat Nat
+def Reducer : Type 0 := (item : Nat) -> (acc : List Nat) -> List Nat
+def base : Nat := 10
+def counts : List Nat := cons 4 (cons 7 nil)
+def twin : Rule := fun (count : Nat) => pair count count
+def withBase : Rule := fun (count : Nat) => pair count base
+def keep : Reducer := fun (item : Nat) (acc : List Nat) => cons item acc
+def applyRule : (f : Rule) -> (count : Nat) -> Prod Nat Nat := fun (f : Rule) (count : Nat) => f count
+def forward : (f : Rule) -> (base : Nat) -> Prod Nat Nat := fun (f : Rule) (base : Nat) => applyRule f base
+def mapRule : (f : Rule) -> List (Prod Nat Nat) := fun (f : Rule) => map f counts
+def collect : (f : Reducer) -> List Nat := fun (f : Reducer) => fold f nil counts
+def paired : Prod Nat Nat := applyRule twin 3
+def captured : Prod Nat Nat := forward withBase 5
+def pairs : List (Prod Nat Nat) := mapRule twin
+def items : List Nat := collect keep

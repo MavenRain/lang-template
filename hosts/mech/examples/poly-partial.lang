@@ -1,0 +1,15 @@
+-- A partial application of a function with type parameters gives the type
+-- arguments first.
+def Rule : Type 0 := (n : Nat) -> Nat
+def use : (h : Rule) -> Nat := fun (h : Rule) => h 1
+def konst : (A : Type 0) -> (a : A) -> (n : Nat) -> A := fun (A : Type 0) (a : A) (n : Nat) => a
+def six : Nat := use (konst Nat 6)
+-- It can give the type arguments only.
+def same : (A : Type 0) -> (a : A) -> A := fun (A : Type 0) (a : A) => a
+def one : Nat := use (same Nat)
+-- The arguments see the parameters around the partial application.
+def tag : (k : Nat) -> Nat := fun (k : Nat) => use (konst Nat k)
+def nine : Nat := tag 9
+-- Structure forms take such a partial application too.
+def xs : List Nat := cons 4 (cons 7 nil)
+def twos : List Nat := map (konst Nat 2) xs

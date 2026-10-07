@@ -1,0 +1,155 @@
+-- Checked constructor evaluation uses the schema's own JSON value family.
+def argumentHead : List Value -> Value := fun (args : List Value) =>
+  case args as self in List return Value with
+  | nil => valueNull
+  | cons head tail => head
+
+def argumentTail : List Value -> List Value := fun (args : List Value) =>
+  case args as self in List return List Value with
+  | nil => nil
+  | cons head tail => tail
+
+def argumentSecond : List Value -> Value := fun (args : List Value) => argumentHead (argumentTail args)
+def argumentThird : List Value -> Value := fun (args : List Value) => argumentHead (argumentTail (argumentTail args))
+
+def objectOne : Text -> Value -> Value := fun (key : Text) (value : Value) =>
+  valueAttrs (attrsField key value attrsEnd)
+
+def objectTwo : Text -> Value -> Text -> Value -> Value :=
+  fun (a : Text) (x : Value) (b : Text) (y : Value) =>
+    valueAttrs (attrsField a x (attrsField b y attrsEnd))
+
+def asNat : Value -> Option Nat := fun (value : Value) =>
+  case value as self in Value return Option Nat with
+  | valueNull => none
+  | valueFlag flag => none
+  | valueNat number => some number
+  | valueText text => none
+  | valueItems items => none
+  | valueAttrs attrs => none
+
+def asText : Value -> Option Text := fun (value : Value) =>
+  case value as self in Value return Option Text with
+  | valueNull => none
+  | valueFlag flag => none
+  | valueNat number => none
+  | valueText text => some text
+  | valueItems items => none
+  | valueAttrs attrs => none
+
+def asValues : Value -> Option Values := fun (value : Value) =>
+  case value as self in Value return Option Values with
+  | valueNull => none
+  | valueFlag flag => none
+  | valueNat number => none
+  | valueText text => none
+  | valueItems items => some items
+  | valueAttrs attrs => none
+
+def asAttrs : Value -> Option Attrs := fun (value : Value) =>
+  case value as self in Value return Option Attrs with
+  | valueNull => none
+  | valueFlag flag => none
+  | valueNat number => none
+  | valueText text => none
+  | valueItems items => none
+  | valueAttrs attrs => some attrs
+
+def buildByte : List Value -> Result Value := fun (args : List Value) =>
+  case (asNat (argumentHead args)) as number in Option return Result Value with
+  | none => failure 0 eTerm
+  | some byte => (
+      case (asText (argumentSecond args)) as text in Option return Result Value with
+      | none => failure 0 eTerm
+      | some rest => select (Result Value) (numberLt byte 256)
+          (success (valueText (textByte byte rest))) (failure 0 eByte))
+
+def buildPrepend : List Value -> Result Value := fun (args : List Value) =>
+  case (asValues (argumentSecond args)) as values in Option return Result Value with
+  | none => failure 0 eTerm
+  | some rest => success (valueItems (valuesItem (argumentHead args) rest))
+
+def buildField : List Value -> Result Value := fun (args : List Value) =>
+  case (asText (argumentHead args)) as key in Option return Result Value with
+  | none => failure 0 eTerm
+  | some name => (
+      case (asAttrs (argumentThird args)) as attrs in Option return Result Value with
+      | none => failure 0 eTerm
+      | some rest => select (Result Value) (hasField name rest)
+          (failure 0 eField)
+          (success (valueAttrs (attrsField name (argumentSecond args) rest))))
+
+def applyPlan : Nat -> Text -> List Value -> Result Value :=
+  fun (mode : Nat) (label : Text) (args : List Value) =>
+  case (natEq mode 0) as branch return Result Value with
+  | 1 (x : prod ()) => success valueNull
+  | 0 (x : prod ()) => (
+    case (natEq mode 1) as branch return Result Value with
+    | 1 (x : prod ()) => success (valueFlag flagNo)
+    | 0 (x : prod ()) => (
+      case (natEq mode 2) as branch return Result Value with
+      | 1 (x : prod ()) => success (valueFlag flagYes)
+      | 0 (x : prod ()) => (
+        case (natEq mode 3) as branch return Result Value with
+        | 1 (x : prod ()) => success (valueText textEnd)
+        | 0 (x : prod ()) => (
+          case (natEq mode 4) as branch return Result Value with
+          | 1 (x : prod ()) => buildByte args
+          | 0 (x : prod ()) => (
+            case (natEq mode 5) as branch return Result Value with
+            | 1 (x : prod ()) => success (argumentHead args)
+            | 0 (x : prod ()) => (
+              case (natEq mode 6) as branch return Result Value with
+              | 1 (x : prod ()) => success (valueItems valuesEnd)
+              | 0 (x : prod ()) => (
+                case (natEq mode 7) as branch return Result Value with
+                | 1 (x : prod ()) => buildPrepend args
+                | 0 (x : prod ()) => (
+                  case (natEq mode 8) as branch return Result Value with
+                  | 1 (x : prod ()) => success (valueAttrs attrsEnd)
+                  | 0 (x : prod ()) => (
+                    case (natEq mode 9) as branch return Result Value with
+                    | 1 (x : prod ()) => buildField args
+                    | 0 (x : prod ()) => (
+                      case (natEq mode 10) as branch return Result Value with
+                      | 1 (x : prod ()) => success (objectTwo kFirst (argumentHead args) kSecond (argumentSecond args))
+                      | 0 (x : prod ()) => (
+                        case (natEq mode 11) as branch return Result Value with
+                        | 1 (x : prod ()) => success (objectOne kInl (argumentHead args))
+                        | 0 (x : prod ()) => (
+                          case (natEq mode 12) as branch return Result Value with
+                          | 1 (x : prod ()) => success (objectOne kInr (argumentHead args))
+                          | 0 (x : prod ()) => (
+                            case (natEq mode 13) as branch return Result Value with
+                            | 1 (x : prod ()) => success (objectOne kSome (argumentHead args))
+                            | 0 (x : prod ()) => (
+                              case (natEq mode 14) as branch return Result Value with
+                              | 1 (x : prod ()) => success (valueText label)
+                              | 0 (x : prod ()) => failure 0 eTerm))))))))))))))
+
+def rec recordFields : List Text -> List Value -> Result Attrs :=
+  fun (fields : List Text) (values : List Value) =>
+  case fields as self in List return Result Attrs with
+  | nil => (
+      case values as args in List return Result Attrs with
+      | nil => success attrsEnd
+      | cons head tail => failure 0 eTerm)
+  | cons field rest => (
+      case values as args in List return Result Attrs with
+      | nil => failure 0 eTerm
+      | cons value tail => (
+          case (recordFields rest tail) as remaining in Result return Result Attrs with
+          | failure at message => failure at message
+          | success attrs => success (attrsField field value attrs)))
+
+def evaluatePlan : Plan -> List Value -> Result Value :=
+  fun (selected : Plan) (values : List Value) =>
+  case selected as self in Plan return Result Value with
+  | plan arguments mode label => applyPlan mode label values
+  | recordPlan arguments fields tag => (
+      case (recordFields fields values) as built in Result return Result Value with
+      | failure at message => failure at message
+      | success attrs => (
+          case tag as variant in Option return Result Value with
+          | none => success (valueAttrs attrs)
+          | some name => success (valueAttrs (attrsField kSchemaTag (valueText name) attrs))))

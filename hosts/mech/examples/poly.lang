@@ -1,0 +1,8 @@
+def id : (A : Type 0) -> (x : A) -> A := fun (A : Type 0) (x : A) => x
+def dup : (A : Type 0) -> (x : A) -> Prod A A := fun (A : Type 0) (x : A) => pair x x
+def swap : (A : Type 0) -> (B : Type 0) -> (p : Prod A B) -> Prod B A := fun (A : Type 0) (B : Type 0) (p : Prod A B) => pair (second p) (first p)
+def Endo : Type 1 := (A : Type 0) -> (x : A) -> A
+def same : Endo := fun (B : Type 0) (y : B) => y
+def four : Nat := id Nat 4
+def twoFours : Prod Nat Nat := dup Nat (same Nat four)
+def swapped : Prod Nat (Prod Nat Nat) := swap (Prod Nat Nat) Nat (pair twoFours 9)

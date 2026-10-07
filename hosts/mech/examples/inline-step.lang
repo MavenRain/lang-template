@@ -1,0 +1,10 @@
+-- fold and unfold can take an inline function. The binders give the
+-- parameter types, and the form gives the result type.
+def xs : List Nat := cons 4 (cons 7 nil)
+def count : Nat := 3
+def copied : List Nat := fold (fun (x : Nat) (acc : List Nat) => cons x acc) nil xs
+def ones : List Nat := fold (fun (acc : List Nat) => cons 1 acc) nil count
+def fives : List Nat := unfold (fun (n : Nat) => some (pair n n)) 2 5
+-- Each of the five functions of a fold over Value can be inline.
+def leaf : Value := valueNat 6
+def six : Nat := fold (fun (n : Nat) => n) (fun (b : Flag) => 0) (fun (t : Text) => 0) (fun (ns : List Nat) => 0) (fun (fs : List (Prod Text Nat)) => 0) 0 leaf

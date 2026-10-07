@@ -1,0 +1,13 @@
+-- All values in this example are checked and evaluated in mechanism-lang.
+def company : Text := "Acme"
+def active : Flag := flagYes
+def count : Nat := 42
+def profile : Attrs :=
+  attrsField "company" (valueText company)
+    (attrsField "active" (valueFlag active)
+      (attrsField "count" (valueNat count) attrsEnd))
+def document : Value := valueAttrs profile
+def contacts : List Text := cons "Mira" (cons "Jo" nil)
+def optional : Option (Option Text) := some none
+def choice : Sum Text Nat := inr count
+def product : Prod Text (List Text) := pair company contacts

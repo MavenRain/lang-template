@@ -1,0 +1,131 @@
+mu Scanned (0 A : Type 0) : Type 0 with
+| scanned : A -> Nat -> Text -> Scanned A
+| scanError : Nat -> Text -> Scanned A
+
+def isLetter : Nat -> Nat := fun (byte : Nat) =>
+  boolOr (between 65 91 byte) (boolOr (between 97 123 byte) (numberEq byte 95))
+def isDigit : Nat -> Nat := between 48 58
+def isNameByte : Nat -> Nat := fun (byte : Nat) => boolOr (isLetter byte) (isDigit byte)
+def isSpace : Nat -> Nat := fun (byte : Nat) =>
+  boolOr (numberEq byte 32) (boolOr (numberEq byte 9)
+    (boolOr (numberEq byte 10) (numberEq byte 13)))
+
+def rec scanName : Nat -> Text -> Text -> Scanned Text :=
+  fun (position : Nat) (done : Text) (source : Text) =>
+  case source as self in Text return Scanned Text with
+  | textEnd => scanned (reverseText done) position textEnd
+  | textByte byte rest =>
+      case (natEq (isNameByte byte) 1) as verdict return Scanned Text with
+      | 0 (x : prod ()) => scanned (reverseText done) position source
+      | 1 (x : prod ()) => scanName (natAdd position 1) (textByte byte done) rest
+
+def rec scanNumber : Nat -> Nat -> Text -> Scanned Nat :=
+  fun (position : Nat) (number : Nat) (source : Text) =>
+  case source as self in Text return Scanned Nat with
+  | textEnd => scanned number position textEnd
+  | textByte byte rest =>
+      case (natEq (isDigit byte) 1) as verdict return Scanned Nat with
+      | 0 (x : prod ()) => scanned number position source
+      | 1 (x : prod ()) =>
+          case (natEq (boolOr (numberLt number 107374182)
+            (boolAnd (numberEq number 107374182) (numberLt byte 52))) 1)
+            as bounded return Scanned Nat with
+          | 0 (x : prod ()) => scanError position eNumber
+          | 1 (x : prod ()) => scanNumber (natAdd position 1)
+              (natAdd (natMul number 10) (natSub byte 48)) rest
+
+def escapeByte : Nat -> Option Nat := fun (byte : Nat) =>
+  select (Option Nat) (boolOr (numberEq byte 34)
+    (boolOr (numberEq byte 92) (numberEq byte 47))) (some byte)
+    (select (Option Nat) (numberEq byte 110) (some 10)
+      (select (Option Nat) (numberEq byte 114) (some 13)
+        (select (Option Nat) (numberEq byte 116) (some 9)
+          (select (Option Nat) (numberEq byte 98) (some 8)
+            (select (Option Nat) (numberEq byte 102) (some 12) none)))))
+
+def rec scanString : Nat -> Nat -> Text -> Text -> Scanned Text :=
+  fun (position : Nat) (escaped : Nat) (done : Text) (source : Text) =>
+  case source as self in Text return Scanned Text with
+  | textEnd => scanError position eString
+  | textByte byte rest =>
+      case (natEq escaped 1) as escape return Scanned Text with
+      | 0 (x : prod ()) => (
+          case (natEq byte 34) as closed return Scanned Text with
+          | 0 (x : prod ()) => (
+              case (natEq (boolOr (numberLt byte 32) (numberEq byte 127)) 1) as control return Scanned Text with
+              | 0 (x : prod ()) => (
+                  case (natEq byte 92) as slash return Scanned Text with
+                  | 0 (x : prod ()) => scanString (natAdd position 1) 0 (textByte byte done) rest
+                  | 1 (x : prod ()) => scanString (natAdd position 1) 1 done rest)
+              | 1 (x : prod ()) => scanError position eString)
+          | 1 (x : prod ()) => scanned (reverseText done) (natAdd position 1) rest)
+      | 1 (x : prod ()) => (
+          case (escapeByte byte) as decoded in Option return Scanned Text with
+          | none => scanError position eEscape
+          | some value => scanString (natAdd position 1) 0 (textByte value done) rest)
+
+def rec scanComment : Nat -> Text -> Scanned Nat := fun (position : Nat) (source : Text) =>
+  case source as self in Text return Scanned Nat with
+  | textEnd => scanned 0 position textEnd
+  | textByte byte rest =>
+      case (natEq (boolOr (numberEq byte 10) (numberEq byte 13)) 1) as newline return Scanned Nat with
+      | 0 (x : prod ()) => scanComment (natAdd position 1) rest
+      | 1 (x : prod ()) => scanned 0 (natAdd position 1) rest
+
+def rec lexFrom : Fuel -> Nat -> List Token -> Text -> Result (List Token) :=
+  fun (fuel : Fuel) (position : Nat) (done : List Token) (source : Text) =>
+  case fuel as guard in Fuel return Result (List Token) with
+  | fuelEnd => failure position eFuel
+  | fuelMore more => (
+    case source as self in Text return Result (List Token) with
+    | textEnd => success (reverseListOnto Token nil (cons (punctuation position 0) done))
+    | textByte byte rest =>
+      case (natEq (isSpace byte) 1) as whitespace return Result (List Token) with
+      | 1 (x : prod ()) => lexFrom more (natAdd position 1) done rest
+      | 0 (x : prod ()) => (
+        case (natEq (isLetter byte) 1) as letter return Result (List Token) with
+        | 1 (x : prod ()) => (
+          case (scanName position textEnd source) as name in Scanned return Result (List Token) with
+          | scanError at message => failure at message
+          | scanned word after tail => lexFrom more after (cons (identifier position word) done) tail)
+        | 0 (x : prod ()) => (
+          case (natEq (isDigit byte) 1) as digit return Result (List Token) with
+          | 1 (x : prod ()) => (
+            case (scanNumber position 0 source) as number in Scanned return Result (List Token) with
+            | scanError at message => failure at message
+            | scanned value after tail => (
+              case (natEq (isLetter (textHead tail)) 1) as glued return Result (List Token) with
+              | 1 (x : prod ()) => failure after eCharacter
+              | 0 (x : prod ()) => lexFrom more after (cons (numberToken position value) done) tail))
+          | 0 (x : prod ()) => (
+            case (natEq byte 34) as quote return Result (List Token) with
+            | 1 (x : prod ()) => (
+              case (scanString (natAdd position 1) 0 textEnd rest) as text in Scanned return Result (List Token) with
+              | scanError at message => failure at message
+              | scanned value after tail => lexFrom more after (cons (stringToken position value) done) tail)
+            | 0 (x : prod ()) => (
+              case (natEq byte 45) as comment return Result (List Token) with
+              | 1 (x : prod ()) => (
+                case (natEq (textHead rest) 45) as dash return Result (List Token) with
+                | 0 (x : prod ()) => select (Result (List Token)) (numberEq (textHead rest) 62)
+                    (lexFrom more (natAdd position 2) (cons (punctuation position 62) done) (textTail rest))
+                    (failure position eCharacter)
+                | 1 (x : prod ()) => (
+                  case (scanComment (natAdd position 2) (textTail rest)) as skipped in Scanned return Result (List Token) with
+                  | scanError at message => failure at message
+                  | scanned value after tail => lexFrom more after done tail))
+              | 0 (x : prod ()) => (
+                case (natEq byte 58) as colon return Result (List Token) with
+                | 1 (x : prod ()) => (
+                  case (natEq (textHead rest) 61) as assign return Result (List Token) with
+                  | 0 (x : prod ()) => lexFrom more (natAdd position 1) (cons (punctuation position 58) done) rest
+                  | 1 (x : prod ()) => lexFrom more (natAdd position 2) (cons (punctuation position 61) done) (textTail rest))
+                | 0 (x : prod ()) => (
+                  case (natEq (boolOr (numberEq byte 40) (numberEq byte 41)) 1) as paren return Result (List Token) with
+                  | 0 (x : prod ()) => select (Result (List Token)) (boolAnd (numberEq byte 61) (numberEq (textHead rest) 62))
+                      (lexFrom more (natAdd position 2) (cons (punctuation position 63) done) (textTail rest))
+                      (failure position eCharacter)
+                  | 1 (x : prod ()) => lexFrom more (natAdd position 1) (cons (punctuation position byte) done) rest)))))))
+
+def lex : Fuel -> Text -> Result (List Token) := fun (fuel : Fuel) (source : Text) =>
+  lexFrom fuel 0 nil source

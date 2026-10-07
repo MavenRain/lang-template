@@ -1,0 +1,138 @@
+def expectMark : Nat -> List Token -> Parsed Nat := fun (mark : Nat) (tokens : List Token) =>
+  case tokens as self in List return Parsed Nat with
+  | nil => parseError 0 eDef
+  | cons head tail => (
+      case head as token in Token return Parsed Nat with
+      | punctuation position actual => select (Parsed Nat) (numberEq mark actual)
+          (parsed 0 tail) (parseError position eDef)
+      | identifier position name => parseError position eDef
+      | numberToken position number => parseError position eDef
+      | stringToken position text => parseError position eDef)
+
+def closeParsed : (0 A : Type 0) -> A -> List Token -> Parsed A :=
+  fun (0 A : Type 0) (value : A) (tokens : List Token) =>
+  case tokens as self in List return Parsed A with
+  | nil => parseError 0 eClose
+  | cons head tail => (
+      case head as token in Token return Parsed A with
+      | punctuation position mark => select (Parsed A) (numberEq mark 41)
+          (parsed value tail) (parseError position eClose)
+      | identifier position name => parseError position eClose
+      | numberToken position number => parseError position eClose
+      | stringToken position text => parseError position eClose)
+
+def typeFormer : Text -> Nat := fun (name : Text) =>
+  boolOr (sameText name sOption) (boolOr (sameText name sList)
+    (boolOr (sameText name sProd) (boolOr (sameText name sSum) (sameText name sType))))
+
+-- A universe is Type 0 or Type 1. An earlier type definition stands for its type.
+-- The name of a function type is not a data type.
+def namedType : Nat -> Text -> List Binding -> List Token -> Parsed LType :=
+  fun (position : Nat) (name : Text) (environment : List Binding) (tokens : List Token) =>
+  case (natEq (sameText name sType) 1) as universe return Parsed LType with
+  | 1 (x : prod ()) => (
+      case tokens as self in List return Parsed LType with
+      | nil => parseError position eType
+      | cons head tail => (
+          case head as token in Token return Parsed LType with
+          | identifier at word => parseError at eType
+          | numberToken at level => select (Parsed LType) (numberLt level 2)
+              (parsed (tyUniverse level) tail) (parseError at eType)
+          | stringToken at text => parseError at eType
+          | punctuation at mark => parseError at eType))
+  | 0 (x : prod ()) => (
+      case (lookup name environment) as found in Option return Parsed LType with
+      | some item => (
+          case item as known in Binding return Parsed LType with
+          | binding other ty value => parseError position eType
+          | typeBinding other universe defined => parsed defined tokens
+          | arrowBinding other params result => parseError position eData
+          | funBinding other params result body => parseError position eType
+          | closureBinding other params result body scope => parseError position eType)
+      | none => (
+          case (domainType name) as found in Option return Parsed LType with
+          | none => parseError position eType
+          | some ty => parsed ty tokens))
+
+-- Type formers take data types only, so a universe is not an
+-- argument.
+def dataType : Nat -> LType -> LType -> List Token -> Parsed LType :=
+  fun (position : Nat) (argument : LType) (result : LType) (tokens : List Token) =>
+  select (Parsed LType) (numberEq (typeLevel argument) 0) (parsed result tokens) (parseError position eData)
+
+def dataTypes : Nat -> LType -> Nat -> LType -> LType -> List Token -> Parsed LType :=
+  fun (at : Nat) (a : LType) (bt : Nat) (b : LType) (result : LType) (tokens : List Token) =>
+  select (Parsed LType) (numberEq (typeLevel a) 0) (dataType bt b result tokens) (parseError at eData)
+
+-- An argument (atom = 1) is a nullary type name or a parenthesized type.
+def rec parseType : Fuel -> Nat -> List Binding -> List Token -> Parsed LType :=
+  fun (fuel : Fuel) (atom : Nat) (environment : List Binding) (tokens : List Token) =>
+  case fuel as guard in Fuel return Parsed LType with
+  | fuelEnd => parseError (firstPosition tokens) eFuel
+  | fuelMore more => (
+    case tokens as self in List return Parsed LType with
+    | nil => parseError 0 eType
+    | cons head tail => (
+      case head as token in Token return Parsed LType with
+      | numberToken position number => parseError position eType
+      | stringToken position text => parseError position eType
+      | punctuation position mark => (
+          case (natEq mark 40) as opening return Parsed LType with
+          | 0 (x : prod ()) => parseError position eType
+          | 1 (x : prod ()) => (
+              case (parseType more 0 environment tail) as inside in Parsed return Parsed LType with
+              | parseError at message => parseError at message
+              | parsed value rest => closeParsed LType value rest))
+      | identifier position name => (
+        case (natEq (boolAnd atom (typeFormer name)) 1) as bare return Parsed LType with
+        | 1 (x : prod ()) => parseError position eParen
+        | 0 (x : prod ()) => (
+        case (natEq (sameText name sNat) 1) as named return Parsed LType with
+        | 1 (x : prod ()) => parsed tyNat tail
+        | 0 (x : prod ()) => (
+          case (natEq (sameText name sText) 1) as named return Parsed LType with
+          | 1 (x : prod ()) => parsed tyText tail
+          | 0 (x : prod ()) => (
+            case (natEq (sameText name sFlag) 1) as named return Parsed LType with
+            | 1 (x : prod ()) => parsed tyFlag tail
+            | 0 (x : prod ()) => (
+              case (natEq (sameText name sValue) 1) as named return Parsed LType with
+              | 1 (x : prod ()) => parsed tyValue tail
+              | 0 (x : prod ()) => (
+                case (natEq (sameText name sValues) 1) as named return Parsed LType with
+                | 1 (x : prod ()) => parsed tyValues tail
+                | 0 (x : prod ()) => (
+                  case (natEq (sameText name sAttrs) 1) as named return Parsed LType with
+                  | 1 (x : prod ()) => parsed tyAttrs tail
+                  | 0 (x : prod ()) => (
+                      case (natEq (sameText name sOption) 1) as named return Parsed LType with
+                      | 1 (x : prod ()) => (
+                        case (parseType more 1 environment tail) as first in Parsed return Parsed LType with
+                        | parseError at message => parseError at message
+                        | parsed a rest => dataType (firstPosition tail) a (tyOption a) rest)
+                      | 0 (x : prod ()) => (
+                        case (natEq (sameText name sList) 1) as named return Parsed LType with
+                        | 1 (x : prod ()) => (
+                          case (parseType more 1 environment tail) as first in Parsed return Parsed LType with
+                          | parseError at message => parseError at message
+                          | parsed a rest => dataType (firstPosition tail) a (tyList a) rest)
+                        | 0 (x : prod ()) => (
+                          case (natEq (sameText name sProd) 1) as named return Parsed LType with
+                          | 1 (x : prod ()) => (
+                            case (parseType more 1 environment tail) as first in Parsed return Parsed LType with
+                            | parseError at message => parseError at message
+                            | parsed a rest => (
+                                case (parseType more 1 environment rest) as second in Parsed return Parsed LType with
+                                | parseError at message => parseError at message
+                                | parsed b after => dataTypes (firstPosition tail) a (firstPosition rest) b (tyProd a b) after))
+                          | 0 (x : prod ()) => (
+                            case (natEq (sameText name sSum) 1) as named return Parsed LType with
+                            | 1 (x : prod ()) => (
+                              case (parseType more 1 environment tail) as first in Parsed return Parsed LType with
+                              | parseError at message => parseError at message
+                              | parsed a rest => (
+                                  case (parseType more 1 environment rest) as second in Parsed return Parsed LType with
+                                  | parseError at message => parseError at message
+                                  | parsed b after => dataTypes (firstPosition tail) a (firstPosition rest) b (tySum a b) after))
+                            | 0 (x : prod ()) => (
+                                    namedType position name environment tail))))))))))))))

@@ -1,0 +1,21 @@
+-- Structure forms, fold and unfold in function bodies. The definition checks
+-- each body once and does not evaluate it. Each application evaluates the
+-- body again with the argument values. A function that a form applies
+-- evaluates in the scope of its definition.
+def id : (n : Nat) -> Nat := fun (n : Nat) => n
+def twice : (n : Nat) -> List Nat := fun (n : Nat) => cons n (cons n nil)
+def keep : (n : Nat) -> Flag := fun (n : Nat) => flagYes
+def prepend : (n : Nat) -> (acc : List Nat) -> List Nat := fun (n : Nat) (acc : List Nat) => cons n acc
+def again : (s : Nat) -> Option (Prod Nat Nat) := fun (s : Nat) => some (pair s s)
+
+def copies : (items : List Nat) -> List Nat := fun (items : List Nat) => bind twice items
+def present : (n : Nat) -> Option Nat := fun (n : Nat) => filter keep (some n)
+def bytes : (t : Text) -> List Nat := fun (t : Text) => fold prepend nil t
+def threeOf : (n : Nat) -> List Nat := fun (n : Nat) => unfold again 3 n
+def choose : (s : Sum Nat Nat) -> Nat := fun (s : Sum Nat Nat) => either id id s
+
+def sevens : List Nat := copies (cons 7 nil)
+def four : Option Nat := present 4
+def hi : List Nat := bytes "Hi"
+def fives : List Nat := threeOf 5
+def six : Nat := choose (inl 6)

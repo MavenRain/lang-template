@@ -1,0 +1,9 @@
+-- Equality proofs compare values. They are not instances.
+def price : Nat := 1200
+def total : Nat := 1200
+def same : Eq Nat price total := refl
+def back : Eq Nat total price := symm same
+def round : Eq Nat price price := trans same back
+
+def offer : Prod Text Nat := pair "Mira" 1200
+def checked : Eq Nat (second offer) price := refl

@@ -1,0 +1,3 @@
+-- Sample domain example: one stock line.
+def bolt : Item := makeItem "bolt" measureBox
+def line : Stock := makeStock bolt 3

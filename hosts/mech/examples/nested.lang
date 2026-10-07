@@ -1,0 +1,6 @@
+def id : (n : Nat) -> Nat := fun (n : Nat) => n
+def double : (n : Nat) -> Prod Nat Nat := fun (n : Nat) => pair n n
+def both : (n : Nat) -> Prod Nat Nat := fun (n : Nat) => double (id n)
+def left : (n : Nat) -> Nat := fun (n : Nat) => first (double n)
+def pairOfFour : Prod Nat Nat := both 4
+def nine : Nat := left 9

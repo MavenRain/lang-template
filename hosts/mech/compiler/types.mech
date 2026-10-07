@@ -1,0 +1,159 @@
+-- Option and Value are the only types whose JSON form can be null.
+def encodesNull : LType -> Nat := fun (ty : LType) =>
+  case ty as self in LType return Nat with
+  | tyNat => 0
+  | tyText => 0
+  | tyFlag => 0
+  | tyValue => 1
+  | tyValues => 0
+  | tyAttrs => 0
+  | tyNamed name => 0
+  | tyOption a => 1
+  | tyList a => 0
+  | tyProd a b => 0
+  | tySum a b => 0
+  | tyUniverse level => 0
+  | tyEq a x y => 1
+  | tyArrow a b => 0
+
+def hasArguments : List LType -> Nat := fun (types : List LType) =>
+  case types as self in List return Nat with
+  | nil => 0
+  | cons head tail => 1
+
+def planArguments : Plan -> List LType := fun (selected : Plan) =>
+  case selected as self in Plan return List LType with
+  | plan arguments mode label => arguments
+  | recordPlan arguments fields tag => arguments
+
+def unaryTypeName : Text -> Text -> Text := fun (head : Text) (arg : Text) =>
+  appendText head (textByte 32 (textByte 40 (appendText arg (textByte 41 textEnd))))
+
+def binaryTypeName : Text -> Text -> Text -> Text := fun (head : Text) (a : Text) (b : Text) =>
+  appendText (unaryTypeName head a) (textByte 32 (textByte 40 (appendText b (textByte 41 textEnd))))
+
+def rec typeName : LType -> Text := fun (ty : LType) =>
+  case ty as self in LType return Text with
+  | tyNat => sNat
+  | tyText => sText
+  | tyFlag => sFlag
+  | tyValue => sValue
+  | tyValues => sValues
+  | tyAttrs => sAttrs
+  | tyNamed name => name
+  | tyOption a => unaryTypeName sOption (typeName a)
+  | tyList a => unaryTypeName sList (typeName a)
+  | tyProd a b => binaryTypeName sProd (typeName a) (typeName b)
+  | tySum a b => binaryTypeName sSum (typeName a) (typeName b)
+  | tyUniverse level => select Text (numberEq level 0) sType0 sType1
+  | tyEq a x y => appendText (unaryTypeName sEq (typeName a))
+      (textByte 32 (textByte 40 (appendText x (textByte 41 (textByte 32
+        (textByte 40 (appendText y (textByte 41 textEnd))))))))
+  | tyArrow a b => textByte 40 (appendText (typeName a) (textByte 41 (textByte 32
+      (textByte 45 (textByte 62 (textByte 32 (typeName b)))))))
+
+-- Data types have level 0. Type 0 has level 1 and Type 1 has level 2.
+def typeLevel : LType -> Nat := fun (ty : LType) =>
+  case ty as self in LType return Nat with
+  | tyNat => 0
+  | tyText => 0
+  | tyFlag => 0
+  | tyValue => 0
+  | tyValues => 0
+  | tyAttrs => 0
+  | tyNamed name => 0
+  | tyOption a => 0
+  | tyList a => 0
+  | tyProd a b => 0
+  | tySum a b => 0
+  | tyUniverse level => natAdd level 1
+  | tyEq a x y => 0
+  | tyArrow a b => 1
+
+-- The current type grammar has unique canonical names, so equality of
+-- these names is structural type equality for this supported subset.
+def sameType : LType -> LType -> Nat := fun (a : LType) (b : LType) =>
+  sameText (typeName a) (typeName b)
+
+def constructorPlan : LType -> Text -> Option Plan := fun (ty : LType) (name : Text) =>
+  case ty as self in LType return Option Plan with
+  | tyNat => none
+  | tyNamed family => domainConstructorPlan family name
+  | tyText => select (Option Plan) (sameText name stextEnd) (some (plan (nil) (3) stextEnd)) (select (Option Plan) (sameText name stextByte) (some (plan (cons tyNat (cons tyText (nil))) (4) stextByte)) (none))
+  | tyFlag => select (Option Plan) (sameText name sflagNo) (some (plan (nil) (1) sflagNo)) (select (Option Plan) (sameText name sflagYes) (some (plan (nil) (2) sflagYes)) (none))
+  | tyValue => select (Option Plan) (sameText name svalueNull) (some (plan (nil) (0) svalueNull)) (select (Option Plan) (sameText name svalueFlag) (some (plan (cons tyFlag (nil)) (5) svalueFlag)) (select (Option Plan) (sameText name svalueNat) (some (plan (cons tyNat (nil)) (5) svalueNat)) (select (Option Plan) (sameText name svalueText) (some (plan (cons tyText (nil)) (5) svalueText)) (select (Option Plan) (sameText name svalueItems) (some (plan (cons tyValues (nil)) (5) svalueItems)) (select (Option Plan) (sameText name svalueAttrs) (some (plan (cons tyAttrs (nil)) (5) svalueAttrs)) (none))))))
+  | tyValues => select (Option Plan) (sameText name svaluesEnd) (some (plan (nil) (6) svaluesEnd)) (select (Option Plan) (sameText name svaluesItem) (some (plan (cons tyValue (cons tyValues (nil))) (7) svaluesItem)) (none))
+  | tyAttrs => select (Option Plan) (sameText name sattrsEnd) (some (plan (nil) (8) sattrsEnd)) (select (Option Plan) (sameText name sattrsField) (some (plan (cons tyText (cons tyValue (cons tyAttrs (nil)))) (9) sattrsField)) (none))
+  | tyOption a => select (Option Plan) (sameText name snone) (some (plan (nil) (0) snone)) (select (Option Plan) (sameText name ssome) (some (plan (cons a (nil)) (select Nat (encodesNull a) 13 5) ssome)) (none))
+  | tyList a => select (Option Plan) (sameText name snil) (some (plan (nil) (6) snil)) (select (Option Plan) (sameText name scons) (some (plan (cons a (cons (tyList a) (nil))) (7) scons)) (none))
+  | tyProd a b => select (Option Plan) (sameText name spair) (some (plan (cons a (cons b (nil))) (10) spair)) (none)
+  | tySum a b => select (Option Plan) (sameText name sinl) (some (plan (cons a (nil)) (11) sinl)) (select (Option Plan) (sameText name sinr) (some (plan (cons b (nil)) (12) sinr)) (none))
+  | tyUniverse level => none
+  | tyEq a x y => none
+  | tyArrow a b => none
+
+-- A function type is a chain of tyArrow. The result of a function type is
+-- not a function type, so the chain gives the parameter types in order. A
+-- parameter of this chain has a name that the source cannot contain.
+def rec arrowParams : LType -> List Param := fun (ty : LType) =>
+  case ty as self in LType return List Param with
+  | tyNat => nil
+  | tyText => nil
+  | tyFlag => nil
+  | tyValue => nil
+  | tyValues => nil
+  | tyAttrs => nil
+  | tyNamed name => nil
+  | tyOption a => nil
+  | tyList a => nil
+  | tyProd a b => nil
+  | tySum a b => nil
+  | tyUniverse level => nil
+  | tyEq a x y => nil
+  | tyArrow a b => cons (param (textByte 32 textEnd) a) (arrowParams b)
+
+def rec arrowResult : LType -> LType := fun (ty : LType) =>
+  case ty as self in LType return LType with
+  | tyNat => tyNat
+  | tyText => tyText
+  | tyFlag => tyFlag
+  | tyValue => tyValue
+  | tyValues => tyValues
+  | tyAttrs => tyAttrs
+  | tyNamed name => tyNamed name
+  | tyOption a => tyOption a
+  | tyList a => tyList a
+  | tyProd a b => tyProd a b
+  | tySum a b => tySum a b
+  | tyUniverse level => tyUniverse level
+  | tyEq a x y => tyEq a x y
+  | tyArrow a b => arrowResult b
+
+def isArrowType : LType -> Nat := fun (ty : LType) =>
+  case (arrowParams ty) as self in List return Nat with
+  | nil => 0
+  | cons head tail => 1
+
+def rec arrowType : List Param -> LType -> LType := fun (params : List Param) (result : LType) =>
+  case params as self in List return LType with
+  | nil => result
+  | cons head tail => (
+      case head as item in Param return LType with
+      | param name ty => tyArrow ty (arrowType tail result))
+
+-- A definition of a data type is a term.
+def isTermType : LType -> Nat := fun (ty : LType) =>
+  numberEq (typeLevel ty) 0
+
+def unknownName : LType -> Text -> Text := fun (expected : LType) (name : Text) => eUnknown
+
+def primitiveReservedName : Text -> Nat := fun (name : Text) =>
+  boolOr (sameText name sNat) (boolOr (sameText name sText) (boolOr (sameText name sFlag) (boolOr (sameText name sValue) (boolOr (sameText name sValues) (boolOr (sameText name sAttrs) (boolOr (sameText name sOption) (boolOr (sameText name sList) (boolOr (sameText name sProd) (boolOr (sameText name sSum) (boolOr (sameText name sdef) (boolOr (sameText name srec) (boolOr (sameText name smu) (boolOr (sameText name saxiom) (boolOr (sameText name spoly) (boolOr (sameText name sspecialize) (boolOr (sameText name stextEnd) (boolOr (sameText name stextByte) (boolOr (sameText name sflagNo) (boolOr (sameText name sflagYes) (boolOr (sameText name snone) (boolOr (sameText name ssome) (boolOr (sameText name snil) (boolOr (sameText name scons) (boolOr (sameText name svalueNull) (boolOr (sameText name svalueFlag) (boolOr (sameText name svalueNat) (boolOr (sameText name svalueText) (boolOr (sameText name svalueItems) (boolOr (sameText name svalueAttrs) (boolOr (sameText name svaluesEnd) (boolOr (sameText name svaluesItem) (boolOr (sameText name sattrsEnd) (boolOr (sameText name sattrsField) (boolOr (sameText name spair) (boolOr (sameText name sinl) (boolOr (sameText name sinr) (0)))))))))))))))))))))))))))))))))))))
+
+-- Forms of SPEC.md are reserved, also the forms that later slices implement.
+def formReservedName : Text -> Nat := fun (name : Text) =>
+  boolOr (sameText name sType) (boolOr (sameText name sfun) (boolOr (sameText name sSigma) (boolOr (sameText name spack) (boolOr (sameText name switness) (boolOr (sameText name spayload) (boolOr (sameText name sEq) (boolOr (sameText name srefl) (boolOr (sameText name stransport) (boolOr (sameText name ssymm) (boolOr (sameText name strans) (boolOr (sameText name scong) (boolOr (sameText name sfirst) (boolOr (sameText name ssecond) (boolOr (sameText name seither) (boolOr (sameText name spure) (boolOr (sameText name smap) (boolOr (sameText name sbind) (boolOr (sameText name sfold) (boolOr (sameText name sunfold) (boolOr (sameText name sfilter) (0)))))))))))))))))))))
+
+def reservedName : Text -> Nat := fun (name : Text) =>
+  boolOr (domainReservedName name)
+    (boolOr (primitiveReservedName name) (formReservedName name))

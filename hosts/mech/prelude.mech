@@ -1,0 +1,31 @@
+-- Base carriers. The language has no string type, so Text is a UTF-8 byte list.
+mu Text : Type 0 with
+| textEnd : Text
+| textByte : (byte : Nat) -> (rest : Text) -> Text
+
+mu Flag : Type 0 with
+| flagNo : Flag
+| flagYes : Flag
+
+mu Option (0 A : Type 0) : Type 0 with
+| none : Option A
+| some : (value : A) -> Option A
+
+mu List (0 A : Type 0) : Type 0 with
+| nil : List A
+| cons : (head : A) -> (tail : List A) -> List A
+
+-- An untyped value. Attrs is a record from text keys to untyped values.
+mu Value : Type 0 with
+| valueNull : Value
+| valueFlag : (flag : Flag) -> Value
+| valueNat : (number : Nat) -> Value
+| valueText : (text : Text) -> Value
+| valueItems : (items : Values) -> Value
+| valueAttrs : (attrs : Attrs) -> Value
+and Values : Type 0 with
+| valuesEnd : Values
+| valuesItem : (head : Value) -> (tail : Values) -> Values
+and Attrs : Type 0 with
+| attrsEnd : Attrs
+| attrsField : (key : Text) -> (value : Value) -> (rest : Attrs) -> Attrs
