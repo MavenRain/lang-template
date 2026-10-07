@@ -15,6 +15,7 @@ def encodesNull : LType -> Nat := fun (ty : LType) =>
   | tyUniverse level => 0
   | tyEq a x y => 1
   | tyArrow a b => 0
+  | tySigma a b => 0
 
 def hasArguments : List LType -> Nat := fun (types : List LType) =>
   case types as self in List return Nat with
@@ -32,7 +33,9 @@ def unaryTypeName : Text -> Text -> Text := fun (head : Text) (arg : Text) =>
 def binaryTypeName : Text -> Text -> Text -> Text := fun (head : Text) (a : Text) (b : Text) =>
   appendText (unaryTypeName head a) (textByte 32 (textByte 40 (appendText b (textByte 41 textEnd))))
 
-def rec typeName : LType -> Text := fun (ty : LType) =>
+-- A Sigma prints its binder as x, then one quote for each enclosing Sigma.
+-- The source names of binders do not change the name of a type.
+def rec typeNameAt : Text -> LType -> Text := fun (binder : Text) (ty : LType) =>
   case ty as self in LType return Text with
   | tyNat => sNat
   | tyText => sText
@@ -41,16 +44,22 @@ def rec typeName : LType -> Text := fun (ty : LType) =>
   | tyValues => sValues
   | tyAttrs => sAttrs
   | tyNamed name => name
-  | tyOption a => unaryTypeName sOption (typeName a)
-  | tyList a => unaryTypeName sList (typeName a)
-  | tyProd a b => binaryTypeName sProd (typeName a) (typeName b)
-  | tySum a b => binaryTypeName sSum (typeName a) (typeName b)
+  | tyOption a => unaryTypeName sOption (typeNameAt binder a)
+  | tyList a => unaryTypeName sList (typeNameAt binder a)
+  | tyProd a b => binaryTypeName sProd (typeNameAt binder a) (typeNameAt binder b)
+  | tySum a b => binaryTypeName sSum (typeNameAt binder a) (typeNameAt binder b)
   | tyUniverse level => select Text (numberEq level 0) sType0 sType1
-  | tyEq a x y => appendText (unaryTypeName sEq (typeName a))
+  | tyEq a x y => appendText (unaryTypeName sEq (typeNameAt binder a))
       (textByte 32 (textByte 40 (appendText x (textByte 41 (textByte 32
         (textByte 40 (appendText y (textByte 41 textEnd))))))))
-  | tyArrow a b => textByte 40 (appendText (typeName a) (textByte 41 (textByte 32
-      (textByte 45 (textByte 62 (textByte 32 (typeName b)))))))
+  | tyArrow a b => textByte 40 (appendText (typeNameAt binder a) (textByte 41 (textByte 32
+      (textByte 45 (textByte 62 (textByte 32 (typeNameAt binder b)))))))
+  | tySigma a b => appendText sSigma (textByte 32 (textByte 40 (appendText binder
+      (textByte 32 (textByte 58 (textByte 32 (appendText (typeNameAt binder a)
+        (textByte 41 (textByte 32 (textByte 40 (appendText
+          (typeNameAt (appendText binder (textByte 39 textEnd)) b) (textByte 41 textEnd))))))))))))
+
+def typeName : LType -> Text := typeNameAt (textByte 120 textEnd)
 
 -- Data types have level 0. Type 0 has level 1 and Type 1 has level 2.
 def typeLevel : LType -> Nat := fun (ty : LType) =>
@@ -69,6 +78,7 @@ def typeLevel : LType -> Nat := fun (ty : LType) =>
   | tyUniverse level => natAdd level 1
   | tyEq a x y => 0
   | tyArrow a b => 1
+  | tySigma a b => 0
 
 -- The current type grammar has unique canonical names, so equality of
 -- these names is structural type equality for this supported subset.
@@ -91,6 +101,7 @@ def constructorPlan : LType -> Text -> Option Plan := fun (ty : LType) (name : T
   | tyUniverse level => none
   | tyEq a x y => none
   | tyArrow a b => none
+  | tySigma a b => none
 
 -- A function type is a chain of tyArrow. The result of a function type is
 -- not a function type, so the chain gives the parameter types in order. A
@@ -111,6 +122,7 @@ def rec arrowParams : LType -> List Param := fun (ty : LType) =>
   | tyUniverse level => nil
   | tyEq a x y => nil
   | tyArrow a b => cons (param (textByte 32 textEnd) a) (arrowParams b)
+  | tySigma a b => nil
 
 def rec arrowResult : LType -> LType := fun (ty : LType) =>
   case ty as self in LType return LType with
@@ -128,6 +140,7 @@ def rec arrowResult : LType -> LType := fun (ty : LType) =>
   | tyUniverse level => tyUniverse level
   | tyEq a x y => tyEq a x y
   | tyArrow a b => arrowResult b
+  | tySigma a b => tySigma a b
 
 def isArrowType : LType -> Nat := fun (ty : LType) =>
   case (arrowParams ty) as self in List return Nat with
@@ -144,6 +157,38 @@ def rec arrowType : List Param -> LType -> LType := fun (params : List Param) (r
 -- A definition of a data type is a term.
 def isTermType : LType -> Nat := fun (ty : LType) =>
   numberEq (typeLevel ty) 0
+
+def rec allQuotes : Text -> Nat := fun (text : Text) =>
+  case text as self in Text return Nat with
+  | textEnd => 1
+  | textByte byte rest => select Nat (numberEq byte 39) (allQuotes rest) 0
+
+-- A side x is the outermost Sigma binder and becomes the printed witness. A
+-- side x with quotes is an inner binder and loses one quote. Printed JSON
+-- never starts with x.
+def instantiateSide : Text -> Text -> Text := fun (shown : Text) (side : Text) =>
+  select Text (sameText side (textByte 120 textEnd)) shown
+    (select Text (boolAnd (numberEq (textHead side) 120) (allQuotes (textTail side)))
+      (textByte 120 (textTail (textTail side))) side)
+
+-- B[x := v] for the outermost binder x of a Sigma body B.
+def rec instantiate : Text -> LType -> LType := fun (shown : Text) (ty : LType) =>
+  case ty as self in LType return LType with
+  | tyNat => tyNat
+  | tyText => tyText
+  | tyFlag => tyFlag
+  | tyValue => tyValue
+  | tyValues => tyValues
+  | tyAttrs => tyAttrs
+  | tyNamed name => tyNamed name
+  | tyOption a => tyOption a
+  | tyList a => tyList a
+  | tyProd a b => tyProd a b
+  | tySum a b => tySum a b
+  | tyUniverse level => tyUniverse level
+  | tyEq a x y => tyEq a (instantiateSide shown x) (instantiateSide shown y)
+  | tyArrow a b => tyArrow a b
+  | tySigma a b => tySigma a (instantiate shown b)
 
 def unknownName : LType -> Text -> Text := fun (expected : LType) (name : Text) => eUnknown
 

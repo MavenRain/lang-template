@@ -1,5 +1,6 @@
 def projectionIndex : Text -> Nat := fun (name : Text) =>
-  select Nat (sameText name sfirst) 1 (select Nat (sameText name ssecond) 2 0)
+  select Nat (sameText name sfirst) 1 (select Nat (sameText name ssecond) 2
+    (select Nat (sameText name switness) 6 (select Nat (sameText name spayload) 7 0)))
 
 -- A checked product value is the object with the fields first and second.
 def projectValue : Nat -> Value -> Value := fun (index : Nat) (value : Value) =>
@@ -17,26 +18,41 @@ def projectValue : Nat -> Value -> Value := fun (index : Nat) (value : Value) =>
           | attrsEnd => valueNull
           | attrsField other next more => next))
 
-def project : Nat -> Nat -> Typed -> List Token -> Parsed Typed :=
-  fun (position : Nat) (index : Nat) (found : Typed) (tokens : List Token) =>
+-- First and second take a product. Witness and payload take a Sigma.
+def projectionError : Nat -> Text := fun (index : Nat) =>
+  select Text (numberLt index 3) eProduct eSigma
+
+-- A Sigma value has the layout of a pair. The type of payload has the
+-- printed witness in place of the binder.
+def project : Fuel -> Nat -> Nat -> Typed -> List Token -> Parsed Typed :=
+  fun (fuel : Fuel) (position : Nat) (index : Nat) (found : Typed) (tokens : List Token) =>
   case found as self in Typed return Parsed Typed with
   | typed ty value => (
       case ty as product in LType return Parsed Typed with
-      | tyNat => parseError position eProduct
-      | tyText => parseError position eProduct
-      | tyFlag => parseError position eProduct
-      | tyValue => parseError position eProduct
-      | tyValues => parseError position eProduct
-      | tyAttrs => parseError position eProduct
-      | tyNamed name => parseError position eProduct
-      | tyOption a => parseError position eProduct
-      | tyList a => parseError position eProduct
-      | tyProd a b => parsed (select Typed (numberEq index 1)
-          (typed a (projectValue 1 value)) (typed b (projectValue 2 value))) tokens
-      | tySum a b => parseError position eProduct
-      | tyUniverse level => parseError position eProduct
-      | tyEq a x y => parseError position eProduct
-      | tyArrow a b => parseError position eProduct)
+      | tyNat => parseError position (projectionError index)
+      | tyText => parseError position (projectionError index)
+      | tyFlag => parseError position (projectionError index)
+      | tyValue => parseError position (projectionError index)
+      | tyValues => parseError position (projectionError index)
+      | tyAttrs => parseError position (projectionError index)
+      | tyNamed name => parseError position (projectionError index)
+      | tyOption a => parseError position (projectionError index)
+      | tyList a => parseError position (projectionError index)
+      | tyProd a b => select (Parsed Typed) (numberLt index 3) (parsed (select Typed (numberEq index 1)
+          (typed a (projectValue 1 value)) (typed b (projectValue 2 value))) tokens) (parseError position eSigma)
+      | tySum a b => parseError position (projectionError index)
+      | tyUniverse level => parseError position (projectionError index)
+      | tyEq a x y => parseError position (projectionError index)
+      | tyArrow a b => parseError position (projectionError index)
+      | tySigma a b => (
+          case (natLt index 3) as paired return Parsed Typed with
+          | 1 (x : prod ()) => parseError position eProduct
+          | 0 (x : prod ()) => (
+              case (printValue fuel textEnd 0 (projectValue 1 value)) as shown in Printed return Parsed Typed with
+              | printError at message => parseError position message
+              | printed left text => parsed (select Typed (numberEq index 6)
+                  (typed a (projectValue 1 value))
+                  (typed (instantiate (reverseText text) b) (projectValue 2 value))) tokens)))
 
 def checkSynthesized : Nat -> LType -> Parsed Typed -> Parsed Value :=
   fun (position : Nat) (expected : LType) (result : Parsed Typed) =>
@@ -48,7 +64,7 @@ def checkSynthesized : Nat -> LType -> Parsed Typed -> Parsed Value :=
           (parsed value rest) (parseError position eTerm))
 
 -- Forms that synthesize a type from one argument: 1 first, 2 second,
--- 3 symm. The form 4 trans takes two arguments, and 5 either takes three.
+-- 3 symm, 6 witness and 7 payload. The form 4 trans takes two arguments, and 5 either takes three.
 def synthForm : Text -> Nat := fun (name : Text) =>
   select Nat (sameText name seither) 5 (select Nat (sameText name ssymm) 3
     (select Nat (sameText name strans) 4 (projectionIndex name)))
@@ -81,6 +97,30 @@ def sidesOf : LType -> EqSides := fun (ty : LType) =>
   | tyUniverse level => notEq
   | tyEq a x y => eqSides a x y
   | tyArrow a b => notEq
+  | tySigma a b => notEq
+
+-- A Sigma type keeps the type A of its witness and its body B.
+mu SigmaParts : Type 0 with
+| sigmaParts : LType -> LType -> SigmaParts
+| notSigma : SigmaParts
+
+def sigmaOf : LType -> SigmaParts := fun (ty : LType) =>
+  case ty as self in LType return SigmaParts with
+  | tyNat => notSigma
+  | tyText => notSigma
+  | tyFlag => notSigma
+  | tyValue => notSigma
+  | tyValues => notSigma
+  | tyAttrs => notSigma
+  | tyNamed name => notSigma
+  | tyOption a => notSigma
+  | tyList a => notSigma
+  | tyProd a b => notSigma
+  | tySum a b => notSigma
+  | tyUniverse level => notSigma
+  | tyEq a x y => notSigma
+  | tyArrow a b => notSigma
+  | tySigma a b => sigmaParts a b
 
 -- A proof has no runtime content. Its value is null.
 def reflCheck : Nat -> LType -> List Token -> Parsed Value :=
@@ -184,6 +224,7 @@ def rec substType : List Binding -> LType -> LType := fun (chosen : List Binding
   | tyUniverse level => tyUniverse level
   | tyEq a x y => tyEq (substType chosen a) x y
   | tyArrow a b => tyArrow (substType chosen a) (substType chosen b)
+  | tySigma a b => tySigma (substType chosen a) (substType chosen b)
 
 -- The value parameters of a function, with the type arguments in place of
 -- the type parameters.
@@ -602,6 +643,7 @@ def shapeOf : LType -> Shape := fun (ty : LType) =>
   | tyUniverse level => shapeNone
   | tyEq a x y => shapeNone
   | tyArrow a b => shapeNone
+  | tySigma a b => shapeNone
 
 -- 0 no instance, 1 Option, 2 List, 3 Sum E, 4 Text, Values or Attrs. Filter
 -- has no Sum instance, and the sequences have only filter.
@@ -1163,8 +1205,8 @@ def rec synthTerm : Fuel -> Nat -> Nat -> List Binding -> List Token -> Worked T
                       case (synthTerm more budget 1 environment tail) as argument in Worked return Worked Typed with
                       | workError at message => workError at message
                       | worked found rest budget => (
-                          case (natLt (synthForm name) 3) as projection return Worked Typed with
-                          | 1 (x : prod ()) => liftParsed Typed budget (project position (synthForm name) found rest)
+                          case (natEq (boolOr (numberLt (synthForm name) 3) (numberLt 5 (synthForm name))) 1) as projection return Worked Typed with
+                          | 1 (x : prod ()) => liftParsed Typed budget (project more position (synthForm name) found rest)
                           | 0 (x : prod ()) => (
                               case (natEq (synthForm name) 3) as symmetric return Worked Typed with
                               | 1 (x : prod ()) => liftParsed Typed budget (symmProof position found rest)
@@ -1227,8 +1269,11 @@ and parseTerm : Fuel -> Nat -> Nat -> LType -> List Binding -> List Token -> Wor
                   case (natEq (synthForm name) 0) as plain return Worked Value with
                   | 1 (x : prod ()) => (
                       case (natEq (structureForm name) 0) as structural return Worked Value with
-                      | 1 (x : prod ()) => select (Worked Value) (sameText name srefl)
-                          (liftParsed Value budget (reflCheck position expected tail)) (workError position (unknownName expected name))
+                      | 1 (x : prod ()) => (
+                          case (natEq (sameText name spack) 1) as packing return Worked Value with
+                          | 1 (x : prod ()) => packTerm more budget position atom expected environment tail
+                          | 0 (x : prod ()) => select (Worked Value) (sameText name srefl)
+                              (liftParsed Value budget (reflCheck position expected tail)) (workError position (unknownName expected name)))
                       | 0 (x : prod ()) => (
                           case (natLt (structureForm name) 5) as monadic return Worked Value with
                           | 1 (x : prod ()) => structureTerm more budget position (structureForm name) atom expected environment tail
@@ -1255,6 +1300,29 @@ and parseTerm : Fuel -> Nat -> Nat -> LType -> List Binding -> List Token -> Wor
 -- bound argument of a function type is a name, a parenthesized inline
 -- function or a partial application. A bare partial application needs parentheses.
 -- A function with type parameters takes its type arguments first.
+-- `pack a b` checks a against A, then b against B with the printed a in
+-- place of the binder. The value is the value of `pair a b`.
+and packTerm : Fuel -> Nat -> Nat -> Nat -> LType -> List Binding -> List Token -> Worked Value :=
+  fun (fuel : Fuel) (budget : Nat) (position : Nat) (atom : Nat) (expected : LType) (environment : List Binding) (tokens : List Token) =>
+  case fuel as guard in Fuel return Worked Value with
+  | fuelEnd => workError position eFuel
+  | fuelMore more => (
+    case (natEq atom 1) as bare return Worked Value with
+    | 1 (x : prod ()) => workError position eParen
+    | 0 (x : prod ()) => (
+      case (sigmaOf expected) as self in SigmaParts return Worked Value with
+      | notSigma => workError position eSigma
+      | sigmaParts a b => (
+        case (parseTerm more budget 1 a environment tokens) as first in Worked return Worked Value with
+        | workError at message => workError at message
+        | worked witnessValue rest budget => (
+          case (printValue more textEnd 0 witnessValue) as shown in Printed return Worked Value with
+          | printError at message => workError position message
+          | printed left text => (
+            case (parseTerm more budget 1 (instantiate (reverseText text) b) environment rest) as second in Worked return Worked Value with
+            | workError at message => workError at message
+            | worked payloadValue after budget => worked (objectTwo kFirst witnessValue kSecond payloadValue) after budget)))))
+
 and partialArgument : Fuel -> Nat -> Nat -> Nat -> LType -> Text -> List Param -> LType -> List Binding -> List Token -> Worked Value :=
   fun (fuel : Fuel) (budget : Nat) (atom : Nat) (position : Nat) (expected : LType) (name : Text) (params : List Param) (result : LType) (environment : List Binding) (tokens : List Token) =>
   case fuel as guard in Fuel return Worked Value with

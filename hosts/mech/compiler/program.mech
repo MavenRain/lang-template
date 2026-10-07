@@ -28,47 +28,6 @@ def rec workBudgetFrom : Nat -> Text -> Nat := fun (done : Nat) (source : Text) 
 mu Located : Type 0 with
 | located : Nat -> Value -> Located
 
--- An equality type keeps the canonical JSON text of its two sides.
-def eqType : Nat -> Fuel -> LType -> Value -> Value -> List Token -> Parsed LType :=
-  fun (position : Nat) (fuel : Fuel) (a : LType) (lhs : Value) (rhs : Value) (tokens : List Token) =>
-  case (printValue fuel textEnd 0 lhs) as left in Printed return Parsed LType with
-  | printError at message => parseError position message
-  | printed leftFuel leftText => (
-      case (printValue fuel textEnd 0 rhs) as right in Printed return Parsed LType with
-      | printError at message => parseError position message
-      | printed rightFuel rightText => parsed (tyEq a (reverseText leftText) (reverseText rightText)) tokens)
-
--- `Eq A x y` is only the type of a definition. A is an atom that is a data
--- type, and the sides x and y are atoms of type A.
-def parseEqType : Nat -> Fuel -> Nat -> List Binding -> List Token -> Worked LType :=
-  fun (position : Nat) (fuel : Fuel) (budget : Nat) (environment : List Binding) (tokens : List Token) =>
-  case (parseType fuel 1 environment tokens) as carrier in Parsed return Worked LType with
-  | parseError at message => workError at message
-  | parsed a afterType => (
-    case (natEq (typeLevel a) 0) as data return Worked LType with
-    | 0 (x : prod ()) => workError (firstPosition tokens) eData
-    | 1 (x : prod ()) => (
-      case (parseTerm fuel budget 1 a environment afterType) as left in Worked return Worked LType with
-      | workError at message => workError at message
-      | worked lhs afterLeft budget => (
-        case (parseTerm fuel budget 1 a environment afterLeft) as right in Worked return Worked LType with
-        | workError at message => workError at message
-        | worked rhs afterRight budget => liftParsed LType budget (eqType position fuel a lhs rhs afterRight))))
-
-def declaredType : Fuel -> Nat -> List Binding -> List Token -> Worked LType :=
-  fun (fuel : Fuel) (budget : Nat) (environment : List Binding) (tokens : List Token) =>
-  case tokens as self in List return Worked LType with
-  | nil => liftParsed LType budget (parseType fuel 0 environment tokens)
-  | cons head tail => (
-      case head as token in Token return Worked LType with
-      | numberToken position number => liftParsed LType budget (parseType fuel 0 environment tokens)
-      | stringToken position text => liftParsed LType budget (parseType fuel 0 environment tokens)
-      | punctuation position mark => liftParsed LType budget (parseType fuel 0 environment tokens)
-      | identifier position name => (
-          case (natEq (sameText name sEq) 1) as equality return Worked LType with
-          | 1 (x : prod ()) => parseEqType position fuel budget environment tail
-          | 0 (x : prod ()) => liftParsed LType budget (parseType fuel 0 environment tokens)))
-
 def dropToken : List Token -> List Token := fun (tokens : List Token) =>
   case tokens as self in List return List Token with
   | nil => nil
@@ -106,6 +65,144 @@ def isWord : Text -> List Token -> Nat := fun (word : Text) (tokens : List Token
 def startsParam : List Token -> Nat := fun (tokens : List Token) =>
   boolAnd (numberEq (markOf tokens) 40) (boolAnd (numberEq (markOf (dropToken tokens)) 1)
     (numberEq (markOf (dropToken (dropToken tokens))) 58))
+
+-- A Sigma binder side is x, then one quote for each binder outside it. The
+-- binders list starts with the outermost binder.
+def rec binderSide : Text -> Text -> List Param -> Option Param :=
+  fun (placeholder : Text) (name : Text) (binders : List Param) =>
+  case binders as self in List return Option Param with
+  | nil => none
+  | cons head tail => (
+      case head as named in Param return Option Param with
+      | param binder ty => select (Option Param) (sameText name binder) (some (param placeholder ty))
+          (binderSide (appendText placeholder (textByte 39 textEnd)) name tail))
+
+def sideBinder : List Param -> List Token -> Option Param :=
+  fun (binders : List Param) (tokens : List Token) =>
+  case (nameOf tokens) as named in Option return Option Param with
+  | none => none
+  | some name => binderSide (textByte 120 textEnd) name binders
+
+-- A side of an equality type keeps its canonical JSON text. A side that is
+-- exactly a Sigma binder name keeps the side of that binder.
+def eqSide : Nat -> Fuel -> Nat -> LType -> List Binding -> List Param -> List Token -> Worked Text :=
+  fun (position : Nat) (fuel : Fuel) (budget : Nat) (a : LType) (environment : List Binding) (binders : List Param) (tokens : List Token) =>
+  case (sideBinder binders tokens) as known in Option return Worked Text with
+  | some binder => (
+      case binder as named in Param return Worked Text with
+      | param side ty => select (Worked Text) (sameType ty a)
+          (worked side (dropToken tokens) budget) (workError (firstPosition tokens) eTerm))
+  | none => (
+      case (parseTerm fuel budget 1 a environment tokens) as term in Worked return Worked Text with
+      | workError at message => workError at message
+      | worked value rest budget => (
+          case (printValue fuel textEnd 0 value) as shown in Printed return Worked Text with
+          | printError at message => workError position message
+          | printed left text => worked (reverseText text) rest budget))
+
+-- `Eq A x y` is only the type of a definition or the body of a Sigma. A is
+-- an atom that is a data type, and the sides x and y are atoms of type A.
+def parseEqType : Nat -> Fuel -> Nat -> List Binding -> List Param -> List Token -> Worked LType :=
+  fun (position : Nat) (fuel : Fuel) (budget : Nat) (environment : List Binding) (binders : List Param) (tokens : List Token) =>
+  case (parseType fuel 1 environment tokens) as carrier in Parsed return Worked LType with
+  | parseError at message => workError at message
+  | parsed a afterType => (
+    case (natEq (typeLevel a) 0) as data return Worked LType with
+    | 0 (x : prod ()) => workError (firstPosition tokens) eData
+    | 1 (x : prod ()) => (
+      case (eqSide position fuel budget a environment binders afterType) as left in Worked return Worked LType with
+      | workError at message => workError at message
+      | worked lhs afterLeft budget => (
+        case (eqSide position fuel budget a environment binders afterLeft) as right in Worked return Worked LType with
+        | workError at message => workError at message
+        | worked rhs afterRight budget => worked (tyEq a lhs rhs) afterRight budget)))
+
+def isSomeBinding : Option Binding -> Nat := fun (found : Option Binding) =>
+  case found as self in Option return Nat with | none => 0 | some item => 1
+def isSomeParam : Option Param -> Nat := fun (found : Option Param) =>
+  case found as self in Option return Nat with | none => 0 | some item => 1
+
+-- A binder name is not reserved, not defined and not an enclosing binder.
+-- A binder `(x : A)` names a data type A.
+def parseBinder : Fuel -> List Binding -> List Param -> List Token -> Parsed Param :=
+  fun (fuel : Fuel) (environment : List Binding) (binders : List Param) (tokens : List Token) =>
+  case (nameOf (dropToken tokens)) as named in Option return Parsed Param with
+  | none => parseError (firstPosition tokens) eType
+  | some name => (
+      case (natEq (startsParam tokens) 1) as opened return Parsed Param with
+      | 0 (x : prod ()) => parseError (firstPosition tokens) eType
+      | 1 (x : prod ()) => (
+          case (natEq (reservedName name) 1) as reserved return Parsed Param with
+          | 1 (x : prod ()) => parseError (firstPosition (dropToken tokens)) eReserved
+          | 0 (x : prod ()) => (
+              case (natEq (boolOr (isSomeBinding (lookup name environment))
+                  (isSomeParam (binderSide textEnd name binders))) 1) as taken return Parsed Param with
+              | 1 (x : prod ()) => parseError (firstPosition (dropToken tokens)) eDuplicate
+              | 0 (x : prod ()) => (
+                  case (parseType fuel 0 environment (dropToken (dropToken (dropToken tokens)))) as declared in Parsed return Parsed Param with
+                  | parseError at message => parseError at message
+                  | parsed ty rest => select (Parsed Param) (numberEq (typeLevel ty) 0)
+                      (closeParsed Param (param name ty) rest)
+                      (parseError (firstPosition (dropToken (dropToken (dropToken tokens)))) eData)))))
+
+-- `Sigma (x : A) B` is only the type of a definition or the body of a
+-- Sigma. B names a binder only as a whole side of an Eq type.
+def rec sigmaType : Fuel -> Nat -> List Binding -> List Param -> List Token -> Worked LType :=
+  fun (fuel : Fuel) (budget : Nat) (environment : List Binding) (binders : List Param) (tokens : List Token) =>
+  case fuel as guard in Fuel return Worked LType with
+  | fuelEnd => workError (firstPosition tokens) eFuel
+  | fuelMore more => (
+      case (parseBinder more environment binders tokens) as known in Parsed return Worked LType with
+      | parseError at message => workError at message
+      | parsed binder rest => (
+          case binder as named in Param return Worked LType with
+          | param name a => (
+              case (sigmaBody more budget environment
+                  (reverseListOnto Param (cons binder nil) (reverseListOnto Param nil binders)) rest) as body in Worked return Worked LType with
+              | workError at message => workError at message
+              | worked b after budget => worked (tySigma a b) after budget)))
+
+-- The body of a Sigma is an Eq type, a Sigma type, one of these two in
+-- parentheses, or a data type.
+and sigmaBody : Fuel -> Nat -> List Binding -> List Param -> List Token -> Worked LType :=
+  fun (fuel : Fuel) (budget : Nat) (environment : List Binding) (binders : List Param) (tokens : List Token) =>
+  case fuel as guard in Fuel return Worked LType with
+  | fuelEnd => workError (firstPosition tokens) eFuel
+  | fuelMore more => (
+      case (natEq (boolAnd (numberEq (markOf tokens) 40)
+          (boolOr (isWord sEq (dropToken tokens)) (isWord sSigma (dropToken tokens)))) 1) as grouped return Worked LType with
+      | 1 (x : prod ()) => (
+          case (sigmaBody more budget environment binders (dropToken tokens)) as inside in Worked return Worked LType with
+          | workError at message => workError at message
+          | worked ty rest budget => liftParsed LType budget (closeParsed LType ty rest))
+      | 0 (x : prod ()) => (
+          case (natEq (isWord sEq tokens) 1) as equality return Worked LType with
+          | 1 (x : prod ()) => parseEqType (firstPosition tokens) more budget environment binders (dropToken tokens)
+          | 0 (x : prod ()) => (
+              case (natEq (isWord sSigma tokens) 1) as dependent return Worked LType with
+              | 1 (x : prod ()) => sigmaType more budget environment binders (dropToken tokens)
+              | 0 (x : prod ()) => (
+                  case (parseType more 0 environment tokens) as plain in Parsed return Worked LType with
+                  | parseError at message => workError at message
+                  | parsed ty rest => select (Worked LType) (numberEq (typeLevel ty) 0)
+                      (worked ty rest budget) (workError (firstPosition tokens) eData)))))
+
+def declaredType : Fuel -> Nat -> List Binding -> List Token -> Worked LType :=
+  fun (fuel : Fuel) (budget : Nat) (environment : List Binding) (tokens : List Token) =>
+  case tokens as self in List return Worked LType with
+  | nil => liftParsed LType budget (parseType fuel 0 environment tokens)
+  | cons head tail => (
+      case head as token in Token return Worked LType with
+      | numberToken position number => liftParsed LType budget (parseType fuel 0 environment tokens)
+      | stringToken position text => liftParsed LType budget (parseType fuel 0 environment tokens)
+      | punctuation position mark => liftParsed LType budget (parseType fuel 0 environment tokens)
+      | identifier position name => (
+          case (natEq (sameText name sEq) 1) as equality return Worked LType with
+          | 1 (x : prod ()) => parseEqType position fuel budget environment nil tail
+          | 0 (x : prod ()) => (
+              case (natEq (sameText name sSigma) 1) as dependent return Worked LType with
+              | 1 (x : prod ()) => sigmaType fuel budget environment nil tail
+              | 0 (x : prod ()) => liftParsed LType budget (parseType fuel 0 environment tokens))))
 
 mu Signature : Type 0 with
 | signature : List Param -> LType -> Signature
@@ -306,7 +403,7 @@ def parseFunction : Fuel -> Nat -> Text -> List Binding -> List Token -> Parsed 
         case (natEq (isWord sfun afterAssign) 1) as opening return Parsed Binding with
         | 0 (x : prod ()) => parseError (firstPosition afterAssign) eFun
         | 1 (x : prod ()) => (
-          case (parseBinders fuel environment nil params nil (dropToken afterAssign)) as bound in Parsed return Parsed Binding with
+          case (parseBinders fuel environment nil params nil (dropToken afterAssign)) as known in Parsed return Parsed Binding with
           | parseError at message => parseError at message
           | parsed binders body => (
             case (parseTerm fuel budget 0 (substType (paramRenames params binders nil) result) (cons checkMarker (bindParams binders nil environment)) body) as checked in Worked return Parsed Binding with

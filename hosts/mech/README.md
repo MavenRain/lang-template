@@ -34,8 +34,10 @@ examples with it. The source language cannot declare new core families.
 The generic compiler and the Node bridge do not need domain-specific edits.
 
 Products, sums, options, lists, pure/map/bind, fold, bounded unfold,
-filter, non-dependent functions, equality proofs and universes are present.
-Dependent functions, Sigma, transport, congruence and generic indexed
+filter, non-dependent functions, Sigma, equality proofs and universes are
+present. Sigma is only the type of a definition, and its body refers to the
+binder only as a whole side of an Eq type.
+Dependent functions, transport, congruence and generic indexed
 families are planned. `formers/FORMERS.md` in the template specifies these
 formers. This kit's `FORMERS.md`, copied to `formers/mech.md` in a
 generated language, records its realization.

@@ -1,0 +1,13 @@
+-- A Sigma value packs a witness with a payload. The payload type can refer
+-- to the witness, but only as a whole side of an Eq type. Sigma is only the
+-- type of a definition. Its instances print the same JSON as a pair.
+def price : Nat := 1200
+def offer : Sigma (n : Nat) (Eq Nat n price) := pack 1200 refl
+def amount : Nat := witness offer
+def checked : Eq Nat (witness offer) 1200 := payload offer
+
+def label : Sigma (n : Nat) Text := pack 3 "three"
+def name : Text := payload label
+
+def twice : Sigma (a : Nat) (Sigma (b : Nat) (Eq Nat a b)) := pack 4 (pack 4 refl)
+def inner : Sigma (b : Nat) (Eq Nat 4 b) := payload twice

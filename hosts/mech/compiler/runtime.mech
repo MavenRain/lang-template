@@ -123,6 +123,7 @@ mu LType : Type 0 with
 | tyUniverse : Nat -> LType
 | tyEq : LType -> Text -> Text -> LType
 | tyArrow : LType -> LType -> LType
+| tySigma : LType -> LType -> LType
 
 mu Plan : Type 0 with
 | plan : List LType -> Nat -> Text -> Plan
