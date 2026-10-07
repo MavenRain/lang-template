@@ -1,0 +1,4 @@
+# Sample literal parameters: REPLACE WITH YOUR DESIGN.
+# One `NAME : Nat := N` for each line.  assemble.sh writes
+# `def NAME : Nat := N` before the prelude and refuses any other line.
+limit : Nat := 9

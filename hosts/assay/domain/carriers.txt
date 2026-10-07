@@ -1,0 +1,9 @@
+# Sample carriers: REPLACE WITH YOUR DESIGN.  One carrier for each line.
+#   eq NAME TYPE                    the Eq family EqNAME on TYPE
+#   list NAME ELEM                  the list family NAME of ELEM
+#   bridge FROM FROMTYPE TO TOTYPE  congFROMTO from EqFROM to EqTO
+# gen/carrier.sh writes the kits in this order.  A bridge comes after the
+# eq lines of its two families.  EqNat is in prelude/Kit.asy.
+eq Color Color
+list Items Item
+bridge Nat Nat Color Color
