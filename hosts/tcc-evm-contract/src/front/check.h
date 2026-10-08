@@ -23,5 +23,9 @@ int entry_of(Machine *m, const Value *type, Entry *out);
 /* Evaluates the definition NAME on ARGS and prints the result. Returns 0, 1
    after a diagnostic, or 2 after an EVAL_ARGS diagnostic. */
 int eval_command(Machine *m, const char *name, char *const *args, int arg_count, FILE *out, FILE *err);
+/* Runs the call script TEXT (from PATH) on the state from `init` (slice K3b)
+   and prints each call and the final state. Returns 0, 1 after a diagnostic,
+   or 2 after an EVAL_ARGS diagnostic. */
+int run_command(Machine *m, const char *path, const char *text, size_t len, FILE *out);
 
 #endif

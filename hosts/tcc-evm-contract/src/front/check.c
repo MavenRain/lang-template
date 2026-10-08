@@ -507,7 +507,7 @@ static const Core *rule_eq(Call *k) {
   const Value *tv = here(c, t);
   const Core *a = check(c, k->args[1], tv);
   const Core *b = a == NULL ? NULL : check(c, k->args[2], tv);
-  k->type = val_univ(c->m, 0);
+  k->type = val_univ(c->m, level);
   return op3(c, OP_EQ, 0, 3, t, a, b);
 }
 
@@ -1578,14 +1578,73 @@ static int parse_u64(const char *s, uint64_t *out) {
   return 1;
 }
 
-/* An entry argument: a Nat in decimal, or a Flag as 0 or 1. */
-static const Value *entry_arg(Machine *m, const char *text, int is_flag) {
-  uint64_t n = 0;
-  if (!parse_u64(text, &n) || (is_flag && n > 1u)) {
-    diag_fail(m->diag, "EVAL_ARGS", m->def, "'%s' is not a %s", text, is_flag ? "Flag (0 or 1)" : "Nat (0 to 2^64-1)");
+/* The type of an entry argument (slice K3b adds U256 and Addr). */
+typedef enum { ARG_TYPE_NAT, ARG_TYPE_FLAG, ARG_TYPE_U256, ARG_TYPE_ADDR } ArgType;
+
+static const char *const ARG_TEXT[] = {
+  "Nat (0 to 2^64-1)", "Flag (0 or 1)", "U256 (5u or 0x and hex digits, then u)", "Addr (0x and 40 hex digits)",
+};
+
+static int hex_digit(char ch, int hex) {
+  if (ch >= '0' && ch <= '9')
+    return ch - '0';
+  if (hex && ch >= 'a' && ch <= 'f')
+    return ch - 'a' + 10;
+  if (hex && ch >= 'A' && ch <= 'F')
+    return ch - 'A' + 10;
+  return -1;
+}
+
+/* A word literal: an Addr is 0x and 40 hex digits; a U256 is decimal digits,
+   or 0x and hex digits, then u. Returns 1 when TEXT is one. */
+static int parse_word(const char *text, uint64_t sort, U256 *out) {
+  size_t n = strlen(text);
+  int hex = n > 2u && text[0] == '0' && text[1] == 'x';
+  size_t start = hex ? 2u : 0u;
+  size_t end = sort == WORD_U256 && n > 0u ? n - 1u : n;
+  size_t i;
+  if (end <= start || (sort == WORD_U256 && text[end] != 'u') || (sort == WORD_ADDR && (!hex || n != 42u)))
+    return 0;
+  u256_from_u64(out, 0);
+  for (i = start; i < end; i++) {
+    int d = hex_digit(text[i], hex);
+    if (d < 0 || !u256_scale_add(out, hex ? 16u : 10u, (uint32_t)d))
+      return 0;
+  }
+  return 1;
+}
+
+static const Value *word_arg(Machine *m, const char *text, uint64_t sort) {
+  U256 *word = arena_alloc(m->arena, sizeof *word);
+  if (word == NULL) {
+    diag_fail(m->diag, "OOM", m->def, "out of memory");
     return NULL;
   }
-  return is_flag ? val_make(m, n == 1u ? OP_FLAG_YES : OP_FLAG_NO, 0, 0, NULL, NULL, NULL) : val_nat(m, n);
+  return parse_word(text, sort, word) ? val_word(m, sort, word) : NULL;
+}
+
+/* An entry argument: a Nat in decimal, a Flag as 0 or 1, a U256 or an Addr
+   in the literal form of the language. */
+static const Value *entry_arg(Machine *m, const char *text, ArgType type) {
+  uint64_t n = 0;
+  const Value *v = NULL;
+  switch (type) {
+  case ARG_TYPE_NAT:
+    v = parse_u64(text, &n) ? val_nat(m, n) : NULL;
+    break;
+  case ARG_TYPE_FLAG:
+    v = parse_u64(text, &n) && n <= 1u ? val_make(m, n == 1u ? OP_FLAG_YES : OP_FLAG_NO, 0, 0, NULL, NULL, NULL) : NULL;
+    break;
+  case ARG_TYPE_U256:
+    v = word_arg(m, text, WORD_U256);
+    break;
+  case ARG_TYPE_ADDR:
+    v = word_arg(m, text, WORD_ADDR);
+    break;
+  }
+  if (v == NULL && m->diag->code == NULL)
+    diag_fail(m->diag, "EVAL_ARGS", m->def, "'%s' is not a %s", text, ARG_TEXT[type]);
+  return v;
 }
 
 static int print_result(Machine *m, const char *name, const Value *v, FILE *out, FILE *err) {
@@ -1651,10 +1710,232 @@ int eval_command(Machine *m, const char *name, char *const *args, int arg_count,
     return 2;
   }
   for (i = 0; i < entry.param_count && v != NULL; i++) {
-    const Value *arg = entry_arg(m, args[i], entry.param_flag[i]);
+    const Value *arg = entry_arg(m, args[i], entry.param_flag[i] ? ARG_TYPE_FLAG : ARG_TYPE_NAT);
     v = arg == NULL ? NULL : apply_value(m, v, arg);
   }
   if (v == NULL)
     return strcmp(m->diag->code != NULL ? m->diag->code : "", "EVAL_ARGS") == 0 ? 2 : 1;
   return print_result(m, name, v, out, err);
+}
+
+/* The role of a definition in a run (slice K3b, D-3), found by its type. */
+typedef enum { ROLE_HELPER, ROLE_ENTRY, ROLE_VIEW } Role;
+
+typedef struct {
+  uint32_t param_count;
+  ArgType params[ENTRY_PARAMS_MAX];
+} RunCall;
+
+/* A run: the script path, the prelude families, the calls so far, the
+   current state and a print buffer of PRINT_MAX bytes. */
+typedef struct {
+  const char *path;
+  uint32_t env;
+  uint32_t out;
+  uint32_t calls;
+  const Value *state;
+  char *buf;
+} Run;
+
+static uint32_t find_family(const Machine *m, const char *name) {
+  uint32_t i;
+  for (i = 0; i < m->family_count; i++) {
+    if (strcmp(m->families[i].name, name) == 0)
+      return i;
+  }
+  return NO_FAMILY;
+}
+
+static int is_family(const Value *t, uint32_t family) {
+  return t != NULL && val_is(t, OP_FAMILY) && t->inst == family;
+}
+
+static int arg_type(const Value *t, ArgType *out) {
+  *out = val_is(t, OP_FLAG) ? ARG_TYPE_FLAG : val_is(t, OP_U256) ? ARG_TYPE_U256 : val_is(t, OP_ADDR) ? ARG_TYPE_ADDR : ARG_TYPE_NAT;
+  return t != NULL && (val_is(t, OP_NAT) || val_is(t, OP_FLAG) || val_is(t, OP_U256) || val_is(t, OP_ADDR));
+}
+
+/* Entry: (env : Env) -> (s : State) -> ARGS -> Option (Prod State (List Out)).
+   View: the same parameters, with a Nat, Flag, U256 or Addr result. Each
+   argument is a Nat, Flag, U256 or Addr. All other definitions are helpers. */
+static Role role_of(Machine *m, const Run *r, const Value *type, RunCall *call) {
+  const Value *t = type;
+  const Value *p;
+  ArgType kind;
+  memset(call, 0, sizeof *call);
+  if (t == NULL || t->kind != VAL_PI || !is_family(t->dom, r->env))
+    return ROLE_HELPER;
+  t = closure_apply(m, t, val_var(m, 0));
+  if (t == NULL || t->kind != VAL_PI || !is_family(t->dom, m->state_family))
+    return ROLE_HELPER;
+  t = closure_apply(m, t, val_var(m, 1));
+  while (t != NULL && t->kind == VAL_PI && call->param_count < ENTRY_PARAMS_MAX && arg_type(t->dom, &kind)) {
+    call->params[call->param_count] = kind;
+    t = closure_apply(m, t, val_var(m, call->param_count + 2u));
+    call->param_count++;
+  }
+  if (arg_type(t, &kind))
+    return ROLE_VIEW;
+  p = val_is(t, OP_OPTION) ? t->args[0] : NULL;
+  if (val_is(p, OP_PROD) && is_family(p->args[0], m->state_family) && val_is(p->args[1], OP_LIST) && is_family(p->args[1]->args[0], r->out))
+    return ROLE_ENTRY;
+  return ROLE_HELPER;
+}
+
+static int has_trap(const Value *v) {
+  uint32_t i;
+  if (v != NULL && v->kind == VAL_TRAP)
+    return 1;
+  for (i = 0; v != NULL && v->kind == VAL_OP && i < v->argc; i++) {
+    if (has_trap(v->args[i]))
+      return 1;
+  }
+  return 0;
+}
+
+static int print_value(Machine *m, const Value *v, char *buf) {
+  return value_print(m, NULL, 0, v, buf, PRINT_MAX) ? 1 : diag_fail(m->diag, "EVAL_PRINT", m->def, "the normal form exceeds the printer limits");
+}
+
+static const Value *make_env(Machine *m, const Run *r, uint64_t now, const U256 *caller) {
+  const Value **args = arena_alloc(m->arena, 2u * sizeof *args);
+  if (args == NULL) {
+    diag_fail(m->diag, "OOM", m->def, "out of memory");
+    return NULL;
+  }
+  args[0] = val_nat(m, now);
+  args[1] = val_word(m, WORD_ADDR, caller);
+  return args[0] == NULL || args[1] == NULL ? NULL : val_op(m, VAL_OP, OP_CTOR, m->families[r->env].first_ctor, 0, args, 2u);
+}
+
+/* One call `NOW CALLER NAME ARGS...` (D-6 to D-8). A trap is a revert: the
+   state does not change. Returns 0, 1, or 2 after EVAL_ARGS. */
+static int run_call(Machine *m, Run *r, uint32_t line, char *const *word, uint32_t count, FILE *out) {
+  const Value *args[ENTRY_PARAMS_MAX];
+  U256 *caller = arena_alloc(m->arena, sizeof *caller);
+  const char *name = count > 2u ? word[2] : "";
+  uint64_t now = 0;
+  uint32_t d = count > 2u ? find_def(m, name) : NO_DEF;
+  RunCall call;
+  Role role;
+  const Value *v;
+  uint32_t i;
+  if (caller == NULL)
+    return diag_fail(m->diag, "OOM", NULL, "out of memory") + 1;
+  if (count < 3u)
+    return diag_fail(m->diag, "RUN_SCRIPT", NULL, "%s:%u: a call is NOW CALLER NAME ARGS...", r->path, line) + 1;
+  if (!parse_u64(word[0], &now))
+    return diag_fail(m->diag, "RUN_SCRIPT", NULL, "%s:%u: NOW '%s' is not a Nat", r->path, line, word[0]) + 1;
+  if (!parse_word(word[1], WORD_ADDR, caller))
+    return diag_fail(m->diag, "RUN_SCRIPT", NULL, "%s:%u: CALLER '%s' is not an Addr (0x and 40 hex digits)", r->path, line, word[1]) + 1;
+  m->def = name;
+  if (d == NO_DEF)
+    return diag_fail(m->diag, "EVAL_ENTRY", name, "%s:%u: no definition has this name", r->path, line) + 1;
+  role = role_of(m, r, m->defs[d].type, &call);
+  if (role == ROLE_HELPER)
+    return diag_fail(m->diag, "EVAL_ENTRY", name, "%s:%u: a helper is not an entry or a view", r->path, line) + 1;
+  if (count - 3u != call.param_count)
+    return diag_fail(m->diag, "EVAL_ARGS", name, "%s:%u: the call takes %u arguments, found %u", r->path, line, call.param_count, count - 3u) + 2;
+  for (i = 0; i < call.param_count; i++) {
+    args[i] = entry_arg(m, word[i + 3u], call.params[i]);
+    if (args[i] == NULL)
+      return strcmp(m->diag->code != NULL ? m->diag->code : "", "EVAL_ARGS") == 0 ? 2 : 1;
+  }
+  m->fuel = EVAL_FUEL_STEPS;
+  v = apply_value(m, apply_value(m, def_value(m, d), make_env(m, r, now, caller)), r->state);
+  for (i = 0; i < call.param_count; i++)
+    v = apply_value(m, v, args[i]);
+  if (v == NULL)
+    return 1;
+  r->calls++;
+  if (has_trap(v)) {
+    fprintf(out, "%u %s trap\n", r->calls, name);
+    return 0;
+  }
+  if (role == ROLE_VIEW) {
+    if (!print_value(m, v, r->buf))
+      return 1;
+    fprintf(out, "%u %s = %s\n", r->calls, name, r->buf);
+    return 0;
+  }
+  if (val_is(v, OP_NONE)) {
+    fprintf(out, "%u %s revert\n", r->calls, name);
+    return 0;
+  }
+  if (!val_is(v, OP_SOME) || !val_is(v->args[0], OP_PAIR))
+    return diag_fail(m->diag, "EVAL_ENTRY", name, "%s:%u: the entry did not compute some or none", r->path, line) + 1;
+  r->state = v->args[0]->args[0];
+  fprintf(out, "%u %s ok\n", r->calls, name);
+  for (v = v->args[0]->args[1]; val_is(v, OP_CONS); v = v->args[1]) {
+    if (!print_value(m, v->args[0], r->buf))
+      return 1;
+    fprintf(out, "  %s\n", r->buf);
+  }
+  return 0;
+}
+
+/* Splits LINE at spaces and tabs. Returns the word count; keeps CAP words. */
+static uint32_t split_words(char *line, char **word, uint32_t cap) {
+  uint32_t count = 0;
+  char *p = line;
+  while (*p != '\0') {
+    if (*p == ' ' || *p == '\t' || *p == '\r') {
+      *p++ = '\0';
+      continue;
+    }
+    if (count < cap)
+      word[count] = p;
+    count++;
+    while (*p != '\0' && *p != ' ' && *p != '\t' && *p != '\r')
+      p++;
+  }
+  return count;
+}
+
+int run_command(Machine *m, const char *path, const char *text, size_t len, FILE *out) {
+  char *word[ENTRY_PARAMS_MAX + 3u];
+  uint32_t init = find_def(m, "init");
+  uint32_t line = 0;
+  size_t pos = 0;
+  int status = 0;
+  Run r;
+  memset(&r, 0, sizeof r);
+  r.path = path;
+  r.env = find_family(m, "Env");
+  r.out = find_family(m, "Out");
+  r.buf = arena_alloc(m->arena, PRINT_MAX);
+  m->def = "init";
+  if (!m->has_state || init == NO_DEF || !is_family(m->defs[init].type, m->state_family) || r.env == NO_FAMILY)
+    return diag_fail(m->diag, "RUN_INIT", NULL, "a run needs a state and def init : State") + 1;
+  if (r.buf == NULL)
+    return diag_fail(m->diag, "OOM", NULL, "out of memory") + 1;
+  r.state = def_value(m, init);
+  if (r.state == NULL)
+    return 1;
+  if (has_trap(r.state))
+    return diag_fail(m->diag, "RUN_INIT", "init", "the start state traps") + 1;
+  while (status == 0 && pos < len) {
+    size_t end = pos;
+    char *copy;
+    uint32_t count;
+    while (end < len && text[end] != '\n')
+      end++;
+    copy = arena_alloc(m->arena, end - pos + 1u);
+    if (copy == NULL)
+      return diag_fail(m->diag, "OOM", NULL, "out of memory") + 1;
+    memcpy(copy, text + pos, end - pos);
+    copy[end - pos] = '\0';
+    line++;
+    count = split_words(copy, word, ENTRY_PARAMS_MAX + 3u);
+    if (count != 0u && strncmp(word[0], "--", 2) != 0)
+      status = run_call(m, &r, line, word, count, out);
+    pos = end + 1u;
+  }
+  if (status != 0)
+    return status;
+  m->def = NULL;
+  if (!print_value(m, r.state, r.buf))
+    return 1;
+  fprintf(out, "state %s\n", r.buf);
+  return 0;
 }

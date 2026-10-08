@@ -36,6 +36,7 @@ check-clang: build/domain.c
 
 check: build/langc build/asmtool build/fronttool check-clang
 	sh test/gate.sh
+	sh test/run.sh
 	sh test/asm.sh
 	sh test/review.sh
 	build/fronttool

@@ -3,7 +3,8 @@
 # The files that hosts/tcc-wasm and hosts/tcc-evm share. They must be the same
 # in both kits.
 TCC_SHARED = src/front src/ir.h src/target.h src/main.c gen domain examples \
-  test/parse test/check test/eval test/ir test/grid.awk .gitignore
+  test/parse test/check test/eval test/ir test/grid.awk test/review.sh \
+  test/fronttool.c .gitignore
 
 # Run the gate of each host kit. Skip a host kit that is not present.
 check: doc-check test

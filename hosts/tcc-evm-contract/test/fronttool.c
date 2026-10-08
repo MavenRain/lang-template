@@ -43,6 +43,18 @@ int main(void) {
   ok &= domain("family U := makeU (decode : Type 0)\nfamily W := makeW (wrapped : U)\ndef bad : Type 0 := W", "TYPE_MISMATCH");
   ok &= domain("family Box (A : Type 1) := box (unbox : A)\ndef bad : Type 0 := Box (Type 0)", "TYPE_MISMATCH");
   ok &= domain("family U := makeU (decode : Type 0)\ndef good : Type 1 := U", NULL);
+  ok &= domain("def bad : Type 0 := Eq (Type 0) Nat Nat", "TYPE_MISMATCH");
+  ok &= domain("def good : Type 1 := Eq (Type 0) Nat Nat", NULL);
+  ok &= domain("family U := makeU (decode : Type 0)\n"
+               "def bad : Type 0 := Eq U (makeU Nat) (makeU Nat)", "TYPE_MISMATCH");
+  ok &= domain("family U := makeU (decode : Type 0)\n"
+               "def good : Type 1 := Eq U (makeU Nat) (makeU Nat)", NULL);
+  ok &= domain("family U := makeU (decode : Type 0)\n"
+               "family W := makeW (proof : Eq U (makeU Nat) (makeU Nat))\n"
+               "def bad : Type 0 := W", "TYPE_MISMATCH");
+  ok &= domain("family U := makeU (decode : Type 0)\n"
+               "family W := makeW (proof : Eq U (makeU Nat) (makeU Nat))\n"
+               "def good : Type 1 := W", NULL);
   ok &= domain("def eta : (p : Prod Nat Nat) -> Eq (Prod Nat Nat) (pair (first p) (second p)) p := fun p => refl", NULL);
   ok &= domain("def eta : (p : Sigma (n : Nat) (Eq Nat n n)) -> Eq (Sigma (n : Nat) (Eq Nat n n)) (pack (witness p) (payload p)) p := fun p => refl", NULL);
   if (ok) puts("domain regressions: passed");

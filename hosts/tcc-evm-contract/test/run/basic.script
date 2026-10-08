@@ -1,0 +1,11 @@
+-- A call script for examples/contract.lang (kit slice K3b).
+-- Each call is NOW CALLER NAME ARGS. This script has an ok call, a revert,
+-- a trap, a view and an emit.
+100 0x00000000000000000000000000000000000000bb deposit 5u
+101 0x00000000000000000000000000000000000000bb withdraw 9u
+
+-- held is 5u, so this deposit overflows u256Add: a trap, as a revert.
+102 0x00000000000000000000000000000000000000bb deposit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffu
+103 0x00000000000000000000000000000000000000bb withdraw 2u
+104 0x00000000000000000000000000000000000000bb balance
+105 0x00000000000000000000000000000000000000bb stamp

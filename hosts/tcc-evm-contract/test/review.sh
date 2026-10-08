@@ -59,4 +59,41 @@ case "$(cat "$tmp/err")" in
   'langc: EVAL_PRINT:'*) ;;
   *) exit 1 ;;
 esac
+# Calls accept each scalar type, and invalid literals keep the CLI exit codes.
+cat >"$tmp/args.lang" <<'EOF'
+state State := makeState (count : Nat)
+def init : State := makeState 0
+def natView : Env -> State -> Nat -> Nat := fun e s n => n
+def flagView : Env -> State -> Flag -> Flag := fun e s b => b
+def wordView : Env -> State -> U256 -> U256 := fun e s w => w
+def addrView : Env -> State -> Addr -> Addr := fun e s a => a
+EOF
+caller=0x00000000000000000000000000000000000000bb
+cat >"$tmp/args.script" <<EOF
+-- A comment does not increment the call number.
+
+1 $caller natView 18446744073709551615
+2 $caller flagView 1
+3 $caller wordView 0x10u
+4 $caller addrView $caller
+EOF
+cat >"$tmp/want" <<EOF
+1 natView = 18446744073709551615
+2 flagView = flagYes
+3 wordView = 16u
+4 addrView = $caller
+state makeState 0
+EOF
+build/langc run "$tmp/args.lang" "$tmp/args.script" >"$tmp/got"
+cmp "$tmp/want" "$tmp/got"
+for call in 'natView 18446744073709551616' 'flagView 2' 'wordView 5' 'addrView 0xbb'; do
+  printf '1 %s %s\n' "$caller" "$call" >"$tmp/args.script"
+  status=0
+  build/langc run "$tmp/args.lang" "$tmp/args.script" >"$tmp/got" 2>"$tmp/err" || status=$?
+  test "$status" = 2
+  case "$(cat "$tmp/err")" in
+    'langc: EVAL_ARGS:'*) ;;
+    *) exit 1 ;;
+  esac
+done
 echo 'review regressions: passed'

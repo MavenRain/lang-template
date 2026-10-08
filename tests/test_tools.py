@@ -186,7 +186,6 @@ class GeneratorTests(unittest.TestCase):
         self.assertFalse(self.dest.exists())
 
 
-@unittest.skipUnless(sys.platform == "darwin", "guard uses macOS libproc")
 class TccKitTests(unittest.TestCase):
     """Make a language from each real TinyCC kit and run its own gate."""
 

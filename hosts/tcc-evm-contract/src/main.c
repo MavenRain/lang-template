@@ -12,6 +12,7 @@
 typedef enum {
   CMD_CHECK,
   CMD_EVAL,
+  CMD_RUN,
   CMD_IR,
   CMD_ABI,
   CMD_BUILD
@@ -23,6 +24,7 @@ typedef struct {
   const char *entry;
   char **args;
   int arg_count;
+  const char *script_path;
   const char *out_path;
   int runtime;
 } Options;
@@ -33,6 +35,7 @@ static const struct {
 } COMMANDS[] = {
   {"check", CMD_CHECK},
   {"eval", CMD_EVAL},
+  {"run", CMD_RUN},
   {"ir", CMD_IR},
   {"abi", CMD_ABI},
   {"build", CMD_BUILD},
@@ -41,6 +44,7 @@ static const struct {
 static int usage(FILE *err) {
   fputs("usage: langc check PROG\n"
         "       langc eval PROG NAME [ARGS...]\n"
+        "       langc run PROG SCRIPT\n"
         "       langc ir PROG\n"
         "       langc abi PROG\n"
         "       langc build PROG -o OUT [--runtime]\n", err);
@@ -86,6 +90,10 @@ static int parse_options(int argc, char **argv, Options *opt, Diag *diag) {
       opt->args = argv + 4;
       opt->arg_count = argc - 4;
       return 1;
+    case CMD_RUN:
+      if (argc != 4) return diag_fail(diag, "USAGE", NULL, "run needs a program and a script");
+      opt->script_path = argv[3];
+      return 1;
     case CMD_BUILD:
       return parse_build_options(argc, argv, opt, diag);
   }
@@ -111,6 +119,7 @@ static const char *command_word(Command command) {
   switch (command) {
     case CMD_CHECK: return "check";
     case CMD_EVAL: return "eval";
+    case CMD_RUN: return "run";
     case CMD_IR: return "ir";
     case CMD_ABI: return "abi";
     case CMD_BUILD: return "build";
@@ -132,6 +141,12 @@ static int run(const Options *opt, Arena *arena, Diag *diag) {
       return 0;
     case CMD_EVAL:
       return eval_command(&machine, opt->entry, opt->args, opt->arg_count, stdout, stderr);
+    case CMD_RUN: {
+      char *script = NULL;
+      size_t script_len = 0;
+      if (!read_source(arena, opt->script_path, &script, &script_len, diag)) return 2;
+      return run_command(&machine, opt->script_path, script, script_len, stdout);
+    }
     case CMD_IR:
     case CMD_ABI:
     case CMD_BUILD:
