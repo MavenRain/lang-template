@@ -3,10 +3,32 @@
 This kit compiles a small typed language to a WebAssembly MVP module.
 One C99 program, `build/langc`, holds the parser, the checker, the
 evaluator, the lowering to a first-order IR and the Wasm writer.
-TinyCC builds it. The front end (`src/front/`), `src/ir.h`,
-`src/target.h`, `src/main.c`, `gen/` and `domain/` are the shared part of
-the TinyCC kits. Only the target file, here `src/wasm.c`, is specific to
-this kit.
+TinyCC builds it.
+
+## Shared files
+
+This kit and `hosts/tcc-evm` share these files. `TCC_SHARED` in the root
+`Makefile` lists them:
+
+- the source: the front end (`src/front/`), `src/ir.h`, `src/target.h`
+  and `src/main.c`
+- the domain and its embed tool: `domain/` and `gen/`
+- the examples: `examples/`
+- the shared tests: `test/parse/`, `test/check/`, `test/eval/`, `test/ir/`,
+  `test/grid.awk`, `test/review.sh` and `test/fronttool.c`
+- `.gitignore`
+
+`make check` at the template root compares each shared entry in the two
+kits with `diff -r`. It fails when a shared file is different in the two
+kits or is missing from one kit. When you change a shared file, make the
+same change in `hosts/tcc-evm`.
+
+These files are specific to this kit:
+
+- the target file: `src/wasm.c`
+- the target test file: `test/run-wasm.mjs`
+- the build and gate files: `Makefile`, `test/gate.sh` and `PIN`
+- the docs: `README.md`, `FORMERS.md` and `docs/CAPABILITY.md`
 
 ## Build
 
