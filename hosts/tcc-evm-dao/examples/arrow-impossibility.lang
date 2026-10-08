@@ -1,0 +1,24 @@
+def members : Nat := 3
+-- Arrow-impossibility regime (host README, The domain).  The constitution reads
+-- member position 0, so it is not constant on orbits and the program can
+-- write no aggregation.  Thus it uses deposit only.
+def first : ChoiceRule := fun (x : Config) =>
+  foldBallots Decision (fun (b : Ballot) (r : Decision) => b) hold (ballots x)
+
+-- Two configurations in one orbit with two verdicts.
+def xs : Ballots := bcons release (bcons refund (bcons hold bnil))
+def x : Config := mkConfig xs (reflNat 3)
+def ys : Ballots := bcons refund (bcons release (bcons hold bnil))
+def y : Config := mkConfig ys (reflNat 3)
+def sameOrbit : EqTally (orbit x) (orbit y) := reflTally (orbit x)
+def firstX : EqDec (first x) release := reflDec release
+def firstY : EqDec (first y) refund := reflDec refund
+
+-- Scenario (refl candidates): one deposit of 5 from address 1 to address 2.
+def countClaims : Claims -> Nat := fun (cs : Claims) =>
+  foldClaims Nat (fun (c : Claim) (n : Nat) => natAdd n 1) 0 cs
+def start : Escrow := tuple (empty, cnil)
+def s1 : Escrow := deposit 1 2 5 start
+def payerAfterDeposit : EqNat (balance s1.0 1) 5 := reflNat 5
+def payeeAfterDeposit : EqNat (balance s1.0 2) 0 := reflNat 0
+def claimsAfterDeposit : EqNat (countClaims s1.1) 1 := reflNat 1

@@ -1,0 +1,53 @@
+def members : Nat := 3
+-- Arrow-Debreu regime (host README, The domain).  The constitution factors through
+-- `orbit`, so the program writes its aggregation and uses cast, settle and
+-- amend.  `H` is plurality by `natLt`: a strict maximum wins, and a tie
+-- holds.  `c` is the count triple (release, refund, hold).
+def plural : T3 -> Decision := fun (c : T3) =>
+  case natLt c.1.0 c.0 with
+  | 0 (u : prod ()) =>
+    (case natLt c.0 c.1.0 with
+     | 0 (v : prod ()) => hold
+     | 1 (v : prod ()) =>
+       (case natLt c.1.1 c.1.0 with
+        | 0 (w : prod ()) => hold
+        | 1 (w : prod ()) => refund))
+  | 1 (u : prod ()) =>
+    (case natLt c.1.1 c.0 with
+     | 0 (v : prod ()) => hold
+     | 1 (v : prod ()) => release)
+def H : Tally -> Decision := fun (t : Tally) => plural (counts t)
+
+def F : ChoiceRule := fun (x : Config) => H (orbit x)
+def agg : Aggregation F := mkAgg F H (fun (x : Config) => reflDec (H (orbit x)))
+
+-- cast: two configurations in one orbit give one verdict.
+def xs : Ballots := bcons release (bcons refund (bcons release bnil))
+def x : Config := mkConfig xs (reflNat 3)
+def ys : Ballots := bcons refund (bcons release (bcons release bnil))
+def y : Config := mkConfig ys (reflNat 3)
+def castX : EqDec (F x) (gov F agg x) := cast F agg x
+def verdictX : EqDec (gov F agg x) release := reflDec release
+def sameOrbit : EqTally (orbit x) (orbit y) := reflTally (orbit x)
+def castXY : EqDec (gov F agg x) (gov F agg y) := castOrbit F agg x y sameOrbit
+
+-- amend at the canonical amendment rule.
+def G : ChoiceRule := amend canonical F agg
+def homX : EqDec (G x) (gov F agg x) := homAmend F agg x
+def aggGov : Aggregation (gov F agg) := reconstitute F agg
+def selfF : IsSelfConstituting F := selfConstitutes F agg
+
+-- Scenario (refl candidates): one deposit of 5 from address 1 to address
+-- 2, then settle at the release verdict of `x`.
+def countClaims : Claims -> Nat := fun (cs : Claims) =>
+  foldClaims Nat (fun (c : Claim) (n : Nat) => natAdd n 1) 0 cs
+def start : Escrow := tuple (empty, cnil)
+def s1 : Escrow := deposit 1 2 5 start
+def c1 : Claim := tuple (1, tuple (2, 5))
+def h1 : Le 5 (balance s1.0 1) := (0, reflNat 5)
+def s2 : Escrow := settle F agg x c1 s1 h1
+def payerAfterSettle : EqNat (balance s2.0 1) 0 := reflNat 0
+def payeeAfterSettle : EqNat (balance s2.0 2) 5 := reflNat 5
+-- settle keeps the claim (host README, The sample domain).
+def claimsAfterSettle : EqNat (countClaims s2.1) 1 := reflNat 1
+def dao : EscrowDAO F := (agg, s2)
