@@ -232,6 +232,27 @@ class HostListTests(unittest.TestCase):
         head, last = lines[0][len("  HOST  "):].rsplit(" or ", 1)
         self.assertEqual(head.split(", ") + [last], self.hosts())
 
+    def test_docs_list_exactly_the_hosts(self):
+        # README.md and the formers matrix name the hosts by hand. The matrix
+        # keeps its own column order, so the test compares it as a set.
+        hosts = self.hosts()
+        readme = (ROOT / "README.md").read_text()
+        table = re.findall(r"^\| ([a-z][a-z0-9-]*) \| .* \| \[`hosts/\1/README\.md`\]",
+                           readme, re.MULTILINE)
+        self.assertEqual(table, hosts)
+        lines = re.findall(r"^- `HOST` is (.*)\.$", readme, re.MULTILINE)
+        self.assertEqual(len(lines), 1, lines)
+        self.assertEqual([host.strip("`") for host in re.split(r", | or ", lines[0])], hosts)
+        kits = re.findall(r"^\| (.*) \| The host kits \|$", readme, re.MULTILINE)
+        self.assertEqual(len(kits), 1, kits)
+        self.assertEqual(re.findall(r"`hosts/([a-z0-9-]+)/`", kits[0]), hosts)
+        header = re.findall(r"^\| ID \| Former \| (.*) \|$",
+                            (ROOT / "formers/FORMERS.md").read_text(), re.MULTILINE)
+        self.assertEqual(len(header), 1, header)
+        columns = [cell.split(" (")[0] for cell in header[0].split(" | ")]
+        self.assertEqual(len(columns), len(set(columns)), columns)
+        self.assertEqual(sorted(columns), sorted(hosts))
+
 
 class TccKitTests(unittest.TestCase):
     """Make a language from each real TinyCC kit and run its own gate."""
