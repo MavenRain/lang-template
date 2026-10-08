@@ -1,0 +1,14 @@
+-- Expected: TYPE_MISMATCH (SPEC section 3). The motive of
+-- `transportOutcome` has the type `Outcome -> Type 0`.
+def members : Nat := 1
+
+-- Candidate 0, the genesis policy.
+def genesis : Policy := mkPolicy allow nonZero blockTime 0 1 flagYes
+
+def candidates : Candidates := lastPolicy genesis
+
+-- The defect: the motive takes a policy, not an outcome.
+def moved : Outcome :=
+  transportOutcome (fun (w : Policy) => Outcome) none none (sameOutcome none) (one genesis)
+
+def rule : Tally -> Outcome := fun (t : Tally) => none

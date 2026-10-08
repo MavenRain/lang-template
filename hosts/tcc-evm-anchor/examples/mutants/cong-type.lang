@@ -1,0 +1,15 @@
+-- Expected: TYPE_MISMATCH (SPEC section 3). `congOutcome f x y e` has the
+-- type `EqOutcome (f x) (f y)`, not the type that the def states.
+def members : Nat := 1
+
+-- Candidate 0, the genesis policy.
+def genesis : Policy := mkPolicy allow nonZero blockTime 0 1 flagYes
+
+def candidates : Candidates := lastPolicy genesis
+
+-- The defect: cong gives `EqOutcome (one genesis) (one genesis)`, not
+-- `EqOutcome none (one genesis)`.
+def congWrong : EqOutcome none (one genesis) :=
+  congOutcome (fun (w : Outcome) => one genesis) none none (sameOutcome none)
+
+def rule : Tally -> Outcome := fun (t : Tally) => none

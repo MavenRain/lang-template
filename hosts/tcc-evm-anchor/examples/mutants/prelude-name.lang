@@ -1,0 +1,13 @@
+-- Expected: REFUSE_NAME (SPEC section 2). The program defines `flagYes`,
+-- a prelude name.
+def members : Nat := 1
+
+-- Candidate 0, the genesis policy.
+def genesis : Policy := mkPolicy allow nonZero blockTime 0 1 flagYes
+
+def candidates : Candidates := lastPolicy genesis
+
+-- The defect: a definition with a prelude name.
+def flagYes : Nat := 1
+
+def rule : Tally -> Outcome := fun (t : Tally) => none

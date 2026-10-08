@@ -1,0 +1,13 @@
+-- Expected: REFUSE_REC (SPEC section 2). The program has a recursive
+-- definition. Only the prelude can use `def rec`; a program uses a fold.
+def members : Nat := 1
+
+-- Candidate 0, the genesis policy.
+def genesis : Policy := mkPolicy allow nonZero blockTime 0 1 flagYes
+
+def candidates : Candidates := lastPolicy genesis
+
+-- The defect: a recursive definition.
+def rec spin : Nat -> Nat := fun (n : Nat) => spin n
+
+def rule : Tally -> Outcome := fun (t : Tally) => none

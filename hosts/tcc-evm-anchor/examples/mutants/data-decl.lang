@@ -1,0 +1,15 @@
+-- Expected: REFUSE_DATA (SPEC section 2). The program declares a data
+-- type with `mu`. Only the prelude can declare a data type.
+def members : Nat := 1
+
+-- Candidate 0, the genesis policy.
+def genesis : Policy := mkPolicy allow nonZero blockTime 0 1 flagYes
+
+def candidates : Candidates := lastPolicy genesis
+
+-- The defect: a data declaration.
+mu Color : Type 0 :=
+  | red : Color
+  | blue : Color
+
+def rule : Tally -> Outcome := fun (t : Tally) => none

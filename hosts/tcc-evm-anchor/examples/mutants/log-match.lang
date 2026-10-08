@@ -1,0 +1,15 @@
+-- Expected: TYPE_MATCH (prelude note P1). `AnchorLog` is opaque: it is
+-- not a data type, so a match on a log is refused.
+def members : Nat := 1
+
+-- Candidate 0, the genesis policy.
+def genesis : Policy := mkPolicy allow nonZero blockTime 0 1 flagYes
+
+def candidates : Candidates := lastPolicy genesis
+
+-- The defect: a match on a log.
+def logSize : AnchorLog -> Nat := fun (l : AnchorLog) =>
+  match l as w in AnchorLog return Nat with
+  | empty => 0
+
+def rule : Tally -> Outcome := fun (t : Tally) => none

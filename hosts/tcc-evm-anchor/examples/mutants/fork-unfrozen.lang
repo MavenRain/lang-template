@@ -1,0 +1,18 @@
+-- Expected: REFUSE_FORK (SPEC section 2; chunk 3 refuses it, this file
+-- parses).  This is examples/programs/schelling-ising.lang with
+-- forkFreeze = flagNo on candidate 1, so each `two p q` outcome of the
+-- rule has a policy that is not frozen.
+def members : Nat := 2
+
+-- Candidate 0, the genesis policy: schema 1.
+def schemaOne : Policy := mkPolicy allow nonZero blockTime 0 1 flagYes
+
+-- Candidate 1: schema 2, not frozen.
+def schemaTwo : Policy := mkPolicy allow nonZero blockTime 0 2 flagNo
+
+def candidates : Candidates := consPolicy schemaOne (lastPolicy schemaTwo)
+
+def rule : Tally -> Outcome := fun (t : Tally) =>
+  case natLt (tallyCount 0 t) (tallyCount 1 t) with
+  | 0 (u : prod ()) => two schemaOne schemaTwo
+  | 1 (u : prod ()) => two schemaTwo schemaOne

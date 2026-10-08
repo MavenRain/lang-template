@@ -1,0 +1,14 @@
+-- Arrow-Impossibility: the fate `none` at every tally (SPEC section 6).
+-- The rule gives no policy, so `admit` gives `flagNo` at every tally and
+-- the contract admits no anchor.
+def members : Nat := 2
+
+-- Candidate 0, the genesis policy.
+def genesis : Policy := mkPolicy allow nonZero blockTime 0 1 flagYes
+
+-- Candidate 1.
+def rival : Policy := mkPolicy deny nonZero blockTime 0 1 flagYes
+
+def candidates : Candidates := consPolicy genesis (lastPolicy rival)
+
+def rule : Tally -> Outcome := fun (t : Tally) => none

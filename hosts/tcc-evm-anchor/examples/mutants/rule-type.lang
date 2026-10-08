@@ -1,0 +1,11 @@
+-- Expected: TYPE_MISMATCH (SPEC section 2). The rule has the type
+-- `Nat -> Outcome`, not `Tally -> Outcome`.
+def members : Nat := 1
+
+-- Candidate 0, the genesis policy.
+def genesis : Policy := mkPolicy allow nonZero blockTime 0 1 flagYes
+
+def candidates : Candidates := lastPolicy genesis
+
+-- The defect: the rule takes a number, not a tally.
+def rule : Nat -> Outcome := fun (n : Nat) => none

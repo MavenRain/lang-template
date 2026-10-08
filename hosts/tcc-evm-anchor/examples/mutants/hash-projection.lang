@@ -1,0 +1,13 @@
+-- Expected: TYPE_SHAPE (prelude note P1). `Hash` is opaque: it is not a
+-- product, so a projection on a hash is refused.
+def members : Nat := 1
+
+-- Candidate 0, the genesis policy.
+def genesis : Policy := mkPolicy allow nonZero blockTime 0 1 flagYes
+
+def candidates : Candidates := lastPolicy genesis
+
+-- The defect: a projection on a hash.
+def hashHead : Hash -> Nat := fun (h : Hash) => h.0
+
+def rule : Tally -> Outcome := fun (t : Tally) => none

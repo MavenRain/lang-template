@@ -1,0 +1,119 @@
+#!/bin/sh
+# Table tests of langc, run by make test after make (SPEC section 10,
+# chunk 4a): the table of each example program gives its fate at every
+# tally, each mutant keeps its code under table, and TABLE_LIMIT bounds the
+# table. Files go to build/test. Each run stays far under 4 GB: the arena
+# of one run takes at most LANG_ARENA_MAX (src/syntax.h).
+set -u
+root=$(cd "$(dirname "$0")/.." && pwd)
+langc=$root/build/langc
+programs=$root/examples/programs
+mutants=$root/examples/mutants
+out=$root/build/test
+mkdir -p "$out"
+failures=0
+
+pass() { printf 'ok   %s\n' "$1"; }
+fail() { printf 'FAIL %s\n' "$1"; failures=$((failures + 1)); }
+
+open='mkPolicy allow nonZero blockTime 0 1 (inj 1 of 2 (tuple ()))'
+
+# table_is NAME PROG: exit 0 and stdout equals $out/want.txt.
+table_is() {
+  "$langc" table "$2" > "$out/table.out" 2> "$out/table.err"
+  status=$?
+  if [ "$status" -eq 0 ] && cmp -s "$out/table.out" "$out/want.txt"; then
+    pass "$1"
+  else
+    fail "$1: exit $status, stderr: $(cat "$out/table.err")"
+    diff "$out/want.txt" "$out/table.out"
+  fi
+}
+
+# arrow-impossibility: none at every tally.
+cat > "$out/want.txt" <<EOF
+members 2
+candidates 2
+policy 0 $open
+policy 1 mkPolicy deny nonZero blockTime 0 1 (inj 1 of 2 (tuple ()))
+tally 2 0 : none
+tally 1 1 : none
+tally 0 2 : none
+EOF
+table_is "arrow-impossibility is none at every tally" "$programs/arrow-impossibility.lang"
+
+# arrow-debreu: one p at every tally; openLog while it has more ballots.
+cat > "$out/want.txt" <<EOF
+members 3
+candidates 2
+policy 0 $open
+policy 1 mkPolicy deny nonZero blockTime 0 1 (inj 1 of 2 (tuple ()))
+tally 3 0 : one 0
+tally 2 1 : one 0
+tally 1 2 : one 1
+tally 0 3 : one 1
+EOF
+table_is "arrow-debreu is one p at every tally" "$programs/arrow-debreu.lang"
+
+# schelling-ising: two p q at every tally, the policy with more ballots
+# first; both sides are frozen.
+cat > "$out/want.txt" <<EOF
+members 2
+candidates 2
+policy 0 $open
+policy 1 mkPolicy allow nonZero blockTime 0 2 (inj 1 of 2 (tuple ()))
+tally 2 0 : two 0 1
+tally 1 1 : two 0 1
+tally 0 2 : two 1 0
+EOF
+table_is "schelling-ising is two p q at every tally" "$programs/schelling-ising.lang"
+
+# Each mutant gives the same code under table as under check.
+for f in "$mutants"/*.lang; do
+  "$langc" check "$f" > /dev/null 2> "$out/check.err"
+  "$langc" table "$f" > /dev/null 2> "$out/table.err"
+  status=$?
+  want=$(cut -d: -f2 "$out/check.err")
+  got=$(cut -d: -f2 "$out/table.err")
+  same=0
+  if [ -n "$want" ] && [ "$want" = "$got" ]; then same=1; fi
+  if [ "$status" -eq 1 ] && [ "$same" -eq 1 ]; then
+    pass "mutant $(basename "$f") keeps$got"
+  else
+    fail "mutant $(basename "$f"): exit $status, check$want, table$got"
+  fi
+done
+
+# TABLE_LIMIT: 2 candidates and N members give N + 1 tallies, at most 4096.
+members_is() {
+  awk -v n="$1" '/^def members/ { print "def members : Nat := " n; next } { print }' \
+    "$programs/arrow-debreu.lang" > "$out/members-$1.lang"
+}
+members_is 4095
+"$langc" table "$out/members-4095.lang" > "$out/table.out" 2> "$out/table.err"
+status=$?
+rows=$(awk '/^tally/' "$out/table.out" | wc -l | tr -d ' ')
+if [ "$status" -eq 0 ] && [ "$rows" -eq 4096 ]; then
+  pass "4095 members give 4096 tallies"
+else
+  fail "4095 members: exit $status, $rows tallies, stderr: $(cat "$out/table.err")"
+fi
+members_is 4096
+"$langc" table "$out/members-4096.lang" > /dev/null 2> "$out/table.err"
+status=$?
+err=$(cat "$out/table.err")
+case $err in
+  "langc: TABLE_LIMIT: candidates: "*"4096 members and 2 candidates give more than 4096 tallies") shape=1 ;;
+  *) shape=0 ;;
+esac
+if [ "$status" -eq 1 ] && [ "$shape" -eq 1 ]; then
+  pass "4096 members are TABLE_LIMIT"
+else
+  fail "4096 members: exit $status, stderr: $err"
+fi
+
+if [ "$failures" -ne 0 ]; then
+  printf '%s table test(s) failed\n' "$failures"
+  exit 1
+fi
+printf 'table.sh: all passed\n'

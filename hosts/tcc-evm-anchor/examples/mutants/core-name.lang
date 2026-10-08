@@ -1,0 +1,13 @@
+-- Expected: REFUSE_NAME (SPEC section 2). The program defines `Hash`, a
+-- core name (prelude note P1).
+def members : Nat := 1
+
+-- Candidate 0, the genesis policy.
+def genesis : Policy := mkPolicy allow nonZero blockTime 0 1 flagYes
+
+def candidates : Candidates := lastPolicy genesis
+
+-- The defect: a definition with a core name.
+def Hash : Type 0 := Nat
+
+def rule : Tally -> Outcome := fun (t : Tally) => none

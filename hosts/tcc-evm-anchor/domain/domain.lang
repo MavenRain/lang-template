@@ -1,0 +1,297 @@
+-- The anchor-lang prelude: the types of SPEC.md section 5, the operations of
+-- section 6 and the structures of section 4.  The section 6 prelude notes
+-- give each encoding choice.
+--
+-- A program defines `members`, `candidates` and `rule`; this file does not.
+-- These are core names, and this file uses them without a definition:
+-- `Nat`, `natAdd`, `natSub`, `natEq`, `natLt`, and the opaque `Hash`,
+-- `Time`, `AnchorLog`, `logMember`, `logInsert`, `hashNonZero` (RULED
+-- 2026-10-07).  A test gives a `Flag`.  Leg 1 of a `Flag` is yes, as for
+-- `natEq`, `natLt`, `logMember` and `hashNonZero`.  This file can use `mu`
+-- and `def rec`; a program cannot (SPEC section 2).
+
+-- Flag
+def Flag : Type 0 := sum (prod (), prod ())
+
+def flagNo : Flag := inj 0 of 2 (tuple ())
+
+def flagYes : Flag := inj 1 of 2 (tuple ())
+
+def flagAnd : Flag -> Flag -> Flag :=
+  fun (a : Flag) (b : Flag) =>
+    case a with
+    | 0 (u : prod ()) => inj 0 of 2 u
+    | 1 (u : prod ()) => b
+
+-- Option: leg 0 has no value, leg 1 has one value.
+def Option : Type 0 -> Type 0 := fun (A : Type 0) => sum (prod (), A)
+
+def optionNone : (0 A : Type 0) -> Option A :=
+  fun (0 A : Type 0) => inj 0 of 2 (tuple ())
+
+def optionPure : (0 A : Type 0) -> A -> Option A :=
+  fun (0 A : Type 0) (a : A) => inj 1 of 2 a
+
+def optionBind : (0 A : Type 0) -> (0 B : Type 0) -> Option A -> (A -> Option B) -> Option B :=
+  fun (0 A : Type 0) (0 B : Type 0) (o : Option A) (f : A -> Option B) =>
+    case o with
+    | 0 (u : prod ()) => inj 0 of 2 u
+    | 1 (a : A) => f a
+
+def optionMap : (0 A : Type 0) -> (0 B : Type 0) -> (A -> B) -> Option A -> Option B :=
+  fun (0 A : Type 0) (0 B : Type 0) (f : A -> B) (o : Option A) =>
+    optionBind A B o (fun (a : A) => optionPure B (f a))
+
+-- Verdict, HashDom and Clock
+mu Verdict : Type 0 :=
+  | allow : Verdict
+  | deny : Verdict
+
+mu HashDom : Type 0 :=
+  | nonZero : HashDom
+
+mu Clock : Type 0 :=
+  | blockTime : Clock
+
+def verdictFlag : Verdict -> Flag := fun (v : Verdict) =>
+  match v as w in Verdict return Flag with
+  | allow => flagYes
+  | deny => flagNo
+
+def inDom : HashDom -> Hash -> Flag := fun (d : HashDom) (h : Hash) =>
+  match d as w in HashDom return Flag with
+  | nonZero => hashNonZero h
+
+-- The block time is the only clock (O1), so `Clock t` is always true.
+def clockAdmits : Clock -> Time -> Flag := fun (c : Clock) (t : Time) =>
+  match c as w in Clock return Flag with
+  | blockTime => flagYes
+
+-- Policy: the fields admit, hashDom, clock, window, schema and forkFreeze,
+-- in that order.  No entry reads window (O7).
+mu Policy : Type 0 :=
+  | mkPolicy (verdict : Verdict) (dom : HashDom) (clock : Clock) (window : Nat) (schema : Nat) (forkFreeze : Flag) : Policy
+
+def policyAdmit : Policy -> Verdict := fun (p : Policy) =>
+  match p as w in Policy return Verdict with
+  | mkPolicy v d c n s f => v
+
+def policyHashDom : Policy -> HashDom := fun (p : Policy) =>
+  match p as w in Policy return HashDom with
+  | mkPolicy v d c n s f => d
+
+def policyClock : Policy -> Clock := fun (p : Policy) =>
+  match p as w in Policy return Clock with
+  | mkPolicy v d c n s f => c
+
+def policyWindow : Policy -> Nat := fun (p : Policy) =>
+  match p as w in Policy return Nat with
+  | mkPolicy v d c n s f => n
+
+def policySchema : Policy -> Nat := fun (p : Policy) =>
+  match p as w in Policy return Nat with
+  | mkPolicy v d c n s f => s
+
+def policyForkFreeze : Policy -> Flag := fun (p : Policy) =>
+  match p as w in Policy return Flag with
+  | mkPolicy v d c n s f => f
+
+-- Candidates: the candidate policies of a program, candidate 0 first.
+-- Candidate 0 is the genesis policy (O10).  The list is not empty.
+mu Candidates : Type 0 :=
+  | lastPolicy (p : Policy) : Candidates
+  | consPolicy (p : Policy) (rest : Candidates) : Candidates
+
+def rec candidatesFold : (0 B : Type 0) -> (Policy -> B) -> (Policy -> B -> B) -> Candidates -> B :=
+  fun (0 B : Type 0) (last : Policy -> B) (step : Policy -> B -> B) (cs : Candidates) =>
+    match cs as w in Candidates return B with
+    | lastPolicy p => last p
+    | consPolicy p rest => step p (candidatesFold B last step rest)
+
+def candidateCount : Candidates -> Nat :=
+  candidatesFold Nat (fun (p : Policy) => 1) (fun (p : Policy) (n : Nat) => natAdd n 1)
+
+-- The policy of a ballot, if the ballot is less than the candidate count.
+def candidateAt : Candidates -> Nat -> Option Policy :=
+  candidatesFold (Nat -> Option Policy)
+    (fun (p : Policy) (i : Nat) =>
+      case natEq i 0 with
+      | 0 (u : prod ()) => optionNone Policy
+      | 1 (u : prod ()) => optionPure Policy p)
+    (fun (p : Policy) (later : Nat -> Option Policy) (i : Nat) =>
+      case natEq i 0 with
+      | 0 (u : prod ()) => later (natSub i 1)
+      | 1 (u : prod ()) => optionPure Policy p)
+
+-- Ballot and Profile: a ballot is the number of a candidate.  A profile has
+-- one ballot for each member position, position 0 first.
+def Ballot : Type 0 := Nat
+
+mu Profile : Type 0 :=
+  | noBallots : Profile
+  | withBallot (b : Ballot) (rest : Profile) : Profile
+
+def rec profileFold : (0 B : Type 0) -> (Ballot -> B -> B) -> B -> Profile -> B :=
+  fun (0 B : Type 0) (step : Ballot -> B -> B) (z : B) (x : Profile) =>
+    match x as w in Profile return B with
+    | noBallots => z
+    | withBallot b rest => step b (profileFold B step z rest)
+
+def profileFilter : (Ballot -> Flag) -> Profile -> Profile :=
+  fun (keep : Ballot -> Flag) (x : Profile) =>
+    profileFold Profile
+      (fun (b : Ballot) (rest : Profile) =>
+        case keep b with
+        | 0 (u : prod ()) => rest
+        | 1 (u : prod ()) => withBallot b rest)
+      noBallots x
+
+-- Tally: one count for each candidate number.  `orbitProjection` forgets
+-- the member positions, so it is the projection to the orbit under the
+-- symmetric group on the positions (O8).
+mu Tally : Type 0 :=
+  | mkTally (count : Nat -> Nat) : Tally
+
+def tallyCount : Nat -> Tally -> Nat := fun (i : Nat) (t : Tally) =>
+  match t as w in Tally return Nat with
+  | mkTally count => count i
+
+def ballotUnit : Nat -> Ballot -> Nat := fun (i : Nat) (b : Ballot) =>
+  case natEq b i with
+  | 0 (u : prod ()) => 0
+  | 1 (u : prod ()) => 1
+
+def orbitProjection : Profile -> Tally := fun (x : Profile) =>
+  mkTally (fun (i : Nat) => profileFold Nat (fun (b : Ballot) (n : Nat) => natAdd (ballotUnit i b) n) 0 x)
+
+-- Outcome: the fate at one tally.  `none` is Arrow-Impossibility, `one p`
+-- is Arrow-Debreu and `two p q` is Schelling-Ising.
+mu Outcome : Type 0 :=
+  | none : Outcome
+  | one (p : Policy) : Outcome
+  | two (p : Policy) (q : Policy) : Outcome
+
+mu EqOutcome : (0 a : Outcome) -> (0 b : Outcome) -> Type 0 :=
+  | sameOutcome : (0 o : Outcome) -> EqOutcome o o
+
+-- Constitution and Aggregation: a constitution `F` maps a profile to an
+-- outcome.  `Aggregation F` is `Lan (orbitProjection act) F` at a discrete
+-- outcome space: a rule on tallies and a proof that `F` factors through it.
+def Constitution : Type 0 := Profile -> Outcome
+
+mu Aggregation : (0 F : Constitution) -> Type 0 :=
+  | aggregate : (0 F : Constitution) -> (L : Tally -> Outcome) -> ((x : Profile) -> EqOutcome (L (orbitProjection x)) (F x)) -> Aggregation F
+
+def Gov : (0 F : Constitution) -> Aggregation F -> Tally -> Outcome :=
+  fun (0 F : Constitution) (L : Aggregation F) =>
+    match L as a in Aggregation G return Tally -> Outcome with
+    | aggregate 0 G l e => l
+
+-- admit: yes only for `one p` with `p.admit = allow` (O2).
+def outcomeAdmits : Outcome -> Flag := fun (o : Outcome) =>
+  match o as w in Outcome return Flag with
+  | none => flagNo
+  | one p => verdictFlag (policyAdmit p)
+  | two p q => flagNo
+
+def admit : (0 F : Constitution) -> Aggregation F -> Tally -> Flag :=
+  fun (0 F : Constitution) (L : Aggregation F) (t : Tally) => outcomeAdmits (Gov F L t)
+
+-- The clock and the hash domain of the policy of a `one p` outcome.
+def policyGuards : Policy -> Time -> Hash -> Flag :=
+  fun (p : Policy) (t : Time) (h : Hash) =>
+    flagAnd (clockAdmits (policyClock p) t) (inDom (policyHashDom p) h)
+
+def outcomeGuards : Outcome -> Time -> Hash -> Flag :=
+  fun (o : Outcome) (t : Time) (h : Hash) =>
+    match o as w in Outcome return Flag with
+    | none => flagNo
+    | one p => policyGuards p t h
+    | two p q => flagNo
+
+-- AnchorDAO and the pair type
+def AnchorPair : Type 0 := prod (Hash, Time)
+
+def AnchorDAO : Constitution -> Type 0 := fun (F : Constitution) =>
+  (L : Aggregation F) * AnchorLog
+
+-- anchor: union with {(h, t)} if `admit` holds at the current tally,
+-- `Clock t` holds and `h` is in `HashDom`; the identity otherwise.  The
+-- chain gives the current tally and the block time `t`.
+def anchor : (0 F : Constitution) -> Tally -> Time -> Hash -> AnchorDAO F -> AnchorDAO F :=
+  fun (0 F : Constitution) (current : Tally) (t : Time) (h : Hash) (s : AnchorDAO F) =>
+    case flagAnd (admit F s.0 current) (outcomeGuards (Gov F s.0 current) t h) with
+    | 0 (u : prod ()) => s
+    | 1 (u : prod ()) => (s.0, logInsert h t s.1)
+
+-- verify: `(h, t)` is in the log.  The check `hash file = h` is off chain.
+def verify : Hash -> Time -> AnchorLog -> Flag :=
+  fun (h : Hash) (t : Time) (l : AnchorLog) => logMember h t l
+
+def verifyPair : AnchorPair -> AnchorLog -> Flag :=
+  fun (p : AnchorPair) (l : AnchorLog) => verify p.0 p.1 l
+
+-- cast: one member moves a ballot from candidate `old` to candidate `new`.
+-- The log does not change.
+def cast : Nat -> Ballot -> Tally -> Tally :=
+  fun (old : Nat) (new : Ballot) (current : Tally) =>
+    mkTally (fun (i : Nat) => natSub (natAdd (tallyCount i current) (ballotUnit i new)) (ballotUnit i old))
+
+-- amend: M1 has only the canonical amendment, the identity (O3).  It keeps
+-- `Gov` and does not change the log.
+def canonicalAmendment : (0 F : Constitution) -> Aggregation F -> Aggregation F :=
+  fun (0 F : Constitution) (L : Aggregation F) => L
+
+def amend : (0 F : Constitution) -> Aggregation F -> Aggregation F :=
+  fun (0 F : Constitution) (L : Aggregation F) => canonicalAmendment F L
+
+def amendKeepsGov : (0 F : Constitution) -> (L : Aggregation F) -> (t : Tally) -> EqOutcome (Gov F (amend F L) t) (Gov F L t) :=
+  fun (0 F : Constitution) (L : Aggregation F) (t : Tally) => sameOutcome (Gov F L t)
+
+def amendDAO : (0 F : Constitution) -> AnchorDAO F -> AnchorDAO F :=
+  fun (0 F : Constitution) (s : AnchorDAO F) => (amend F s.0, s.1)
+
+-- IsSelfConstituting: some aggregation `L` with `Gov L` equal to `F` at
+-- each profile.  Every aggregation gives one.
+def lanProof : (0 F : Constitution) -> (L : Aggregation F) -> (x : Profile) -> EqOutcome (Gov F L (orbitProjection x)) (F x) :=
+  fun (0 F : Constitution) (L : Aggregation F) =>
+    match L as a in Aggregation G return (x : Profile) -> EqOutcome (Gov G a (orbitProjection x)) (G x) with
+    | aggregate 0 G l e => e
+
+def IsSelfConstituting : Constitution -> Type 0 := fun (F : Constitution) =>
+  (L : Aggregation F) * ((x : Profile) -> EqOutcome (Gov F L (orbitProjection x)) (F x))
+
+def selfConstitution : (0 F : Constitution) -> Aggregation F -> IsSelfConstituting F :=
+  fun (0 F : Constitution) (L : Aggregation F) => (L, lanProof F L)
+
+-- The constitution of a program: its `rule` reads only the tally, so it
+-- has an aggregation by construction.
+def constitutionOf : (Tally -> Outcome) -> Constitution :=
+  fun (r : Tally -> Outcome) (x : Profile) => r (orbitProjection x)
+
+def aggregationOf : (r : Tally -> Outcome) -> Aggregation (constitutionOf r) :=
+  fun (r : Tally -> Outcome) =>
+    aggregate (constitutionOf r) r (fun (x : Profile) => sameOutcome (r (orbitProjection x)))
+
+-- Transport, symmetry, transitivity and cong of EqOutcome (F12, F13).
+-- Each one is a dependent match on the proof, so at `sameOutcome o` it
+-- computes by definition: transport gives its input `u`, and cong gives
+-- `sameOutcome (f o)`.  The motive and the indices are erased.
+def transportOutcome : (0 P : Outcome -> Type 0) -> (0 x : Outcome) -> (0 y : Outcome) -> EqOutcome x y -> P x -> P y :=
+  fun (0 P : Outcome -> Type 0) (0 x : Outcome) (0 y : Outcome) (e : EqOutcome x y) =>
+    match e as q in EqOutcome i j return P i -> P j with
+    | sameOutcome 0 z => fun (u : P z) => u
+
+def symmOutcome : (0 x : Outcome) -> (0 y : Outcome) -> EqOutcome x y -> EqOutcome y x :=
+  fun (0 x : Outcome) (0 y : Outcome) (e : EqOutcome x y) =>
+    match e as q in EqOutcome i j return EqOutcome j i with
+    | sameOutcome 0 z => sameOutcome z
+
+def transOutcome : (0 x : Outcome) -> (0 y : Outcome) -> (0 z : Outcome) -> EqOutcome x y -> EqOutcome y z -> EqOutcome x z :=
+  fun (0 x : Outcome) (0 y : Outcome) (0 z : Outcome) (e1 : EqOutcome x y) (e2 : EqOutcome y z) =>
+    transportOutcome (fun (w : Outcome) => EqOutcome x w) y z e2 e1
+
+def congOutcome : (f : Outcome -> Outcome) -> (0 x : Outcome) -> (0 y : Outcome) -> EqOutcome x y -> EqOutcome (f x) (f y) :=
+  fun (f : Outcome -> Outcome) (0 x : Outcome) (0 y : Outcome) (e : EqOutcome x y) =>
+    match e as q in EqOutcome i j return EqOutcome (f i) (f j) with
+    | sameOutcome 0 z => sameOutcome (f z)

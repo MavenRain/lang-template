@@ -1,0 +1,19 @@
+-- Schelling-Ising: the fate `two p q` at every tally (SPEC section 6).
+-- There are two members and two candidates.  The rule keeps both
+-- policies, the policy with more ballots first.  Both policies set
+-- forkFreeze = flagYes, so the fork admits nothing and `verify` reads the
+-- shared prefix (O2).
+def members : Nat := 2
+
+-- Candidate 0, the genesis policy: schema 1.
+def schemaOne : Policy := mkPolicy allow nonZero blockTime 0 1 flagYes
+
+-- Candidate 1: schema 2.
+def schemaTwo : Policy := mkPolicy allow nonZero blockTime 0 2 flagYes
+
+def candidates : Candidates := consPolicy schemaOne (lastPolicy schemaTwo)
+
+def rule : Tally -> Outcome := fun (t : Tally) =>
+  case natLt (tallyCount 0 t) (tallyCount 1 t) with
+  | 0 (u : prod ()) => two schemaOne schemaTwo
+  | 1 (u : prod ()) => two schemaTwo schemaOne
