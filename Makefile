@@ -12,6 +12,11 @@ check: doc-check test
 	else \
 	  echo "check: skip hosts/assay (no gate.sh)"; \
 	fi
+	@if [ -f hosts/tcc-json/Makefile ]; then \
+	  $(MAKE) -C hosts/tcc-json check; \
+	else \
+	  echo "check: skip hosts/tcc-json (no Makefile)"; \
+	fi
 
 # Fail on an em-dash or en-dash in a Markdown file, or on a malformed placeholder.
 doc-check:

@@ -29,6 +29,7 @@ Choose the host by the target.
 |---|---|---|---|
 | mech | One JSON document: the final state of each instance | `mech.exe` (mechanism-lang) | [`hosts/mech/README.md`](hosts/mech/README.md) |
 | assay | An EVM contract and a kernel file | `assay` | [`hosts/assay/README.md`](hosts/assay/README.md) |
+| tcc-json | One JSON document: the final state of each instance | `build/langc` (TinyCC) | [`hosts/tcc-json/README.md`](hosts/tcc-json/README.md) |
 
 The realization matrix in `formers/FORMERS.md` section 5 gives the status of
 each former on each host. Read it before you choose. For example, assay
@@ -42,7 +43,8 @@ bin/new-lang.sh NAME HOST [DEST]
 ```
 
 - `NAME` is the language name. It must match `^[a-z][a-z0-9-]*$`.
-- `HOST` is `mech` or `assay`.
+  The `tcc-json` host reserves `instances` for its JSON document key.
+- `HOST` is `mech`, `assay` or `tcc-json`.
 - `DEST` is the new directory. The default is `../NAME` beside the template
   root. The script refuses a `DEST` that exists.
 
@@ -83,7 +85,7 @@ replaces `{{LANG}}` with `NAME` and `{{HOST}}` with `HOST`. It runs
 | `docs/STATUS.template.md`, `docs/VALIDATION.template.md` | The status and validation forms |
 | `bin/new-lang.sh` | Makes a new language |
 | `bin/doc-check.pl` | The check behind `make doc-check` |
-| `hosts/mech/`, `hosts/assay/` | The host kits |
+| `hosts/mech/`, `hosts/assay/`, `hosts/tcc-json/` | The host kits |
 
 ## Gates
 

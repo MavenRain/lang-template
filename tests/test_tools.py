@@ -116,6 +116,36 @@ class GeneratorTests(unittest.TestCase):
         self.assertEqual((self.dest / "keep").read_text(), "untouched")
         self.assertFalse((self.dest / "SPEC.md").exists())
 
+    def test_tcc_json_host(self):
+        kit = self.template / "hosts" / "tcc-json"
+        (kit / "src").mkdir(parents=True)
+        (kit / "README.md").write_text("Host guide\n")
+        (kit / "FORMERS.md").write_text("Host formers\n")
+        (kit / "src/json.c").write_text('static const char LANG_NAME[] = "{{LANG}}";\n')
+        result = run("bash", str(self.template / "bin/new-lang.sh"),
+                     "example-lang", "tcc-json", str(self.dest))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.dest / "formers/tcc-json.md").read_text(), "Host formers\n")
+        self.assertEqual((self.dest / "docs/host/README.md").read_text(), "Host guide\n")
+        self.assertEqual((self.dest / "src/json.c").read_text(),
+                         'static const char LANG_NAME[] = "example-lang";\n')
+        self.assertIn("Run the gate in", result.stdout)
+        self.assertIn(": make check\n", result.stdout)
+
+    def test_unknown_host_is_rejected(self):
+        result = run("bash", str(self.template / "bin/new-lang.sh"),
+                     "example-lang", "nohost", str(self.dest))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unknown HOST", result.stderr)
+        self.assertFalse(self.dest.exists())
+
+    def test_tcc_json_document_key_is_reserved(self):
+        result = run("bash", str(self.template / "bin/new-lang.sh"),
+                     "instances", "tcc-json", str(self.dest))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("reserved by the tcc-json document format", result.stderr)
+        self.assertFalse(self.dest.exists())
+
 
 @unittest.skipUnless(sys.platform == "darwin", "guard uses macOS libproc")
 class GuardTests(unittest.TestCase):

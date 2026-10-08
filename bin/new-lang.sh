@@ -3,7 +3,7 @@
 #
 # Usage: bin/new-lang.sh NAME HOST [DEST]
 #
-# NAME is the language name (^[a-z][a-z0-9-]*$). HOST is mech or assay. DEST
+# NAME is the language name (^[a-z][a-z0-9-]*$). HOST is mech, assay or tcc-json. DEST
 # is the new directory; the default is ../NAME beside the template root. The
 # script copies the template files and the host kit hosts/HOST into DEST,
 # replaces {{LANG}} with NAME and {{HOST}} with HOST, and runs git init. It
@@ -29,7 +29,7 @@ set -euo pipefail
 usage() {
   printf 'usage: %s NAME HOST [DEST]\n' "${0##*/}" >&2
   printf '  NAME  language name, matching ^[a-z][a-z0-9-]*$\n' >&2
-  printf '  HOST  mech or assay\n' >&2
+  printf '  HOST  mech, assay or tcc-json\n' >&2
   printf '  DEST  new directory (default: ../NAME beside the template root)\n' >&2
 }
 
@@ -47,9 +47,10 @@ dest=${3:-$root/../$name}
 
 [[ $name =~ ^[a-z][a-z0-9-]*$ ]] || refuse "bad NAME '$name': use ^[a-z][a-z0-9-]*\$"
 case $host in
-  mech | assay) ;;
-  *) refuse "unknown HOST '$host': use mech or assay" ;;
+  mech | assay | tcc-json) ;;
+  *) refuse "unknown HOST '$host': use mech, assay or tcc-json" ;;
 esac
+[[ $host != tcc-json || $name != instances ]] || refuse "NAME 'instances' is reserved by the tcc-json document format"
 kit=$root/hosts/$host
 [[ -d $kit ]] || refuse "the host kit hosts/$host is missing"
 [[ ! -e $dest && ! -L $dest ]] || refuse "DEST '$dest' exists"
@@ -187,6 +188,7 @@ git -C "$dest" init -q -b main
 case $host in
   mech) gate="make check test" ;;
   assay) gate="bash gate.sh" ;;
+  tcc-json) gate="make check" ;;
 esac
 
 cat <<EOF

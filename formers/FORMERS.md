@@ -246,23 +246,24 @@ that a host cannot satisfy makes the status PARTIAL or HOST-LIMIT.
 
 Each cell gives the status and the source of the fact at the origin commit.
 mech facts come from ledger-lang 997fa7b. assay facts come from escrow-lang
-279214c. The host files cite the host kits in this repository. When a status
+279214c. tcc-json facts come from `hosts/tcc-json` in this repository.
+The host files cite the host kits in this repository. When a status
 changes, update the host file and this matrix in the same change.
 
-| ID | Former | mech (ledger-lang 997fa7b) | assay (escrow-lang 279214c) |
-|---|---|---|---|
-| F1 | Product | DONE: `compiler/runtime.mech:125`, `compiler/checker.mech:1-44` | DONE: built-in `prod`, `tuple`, `t.0`, `t.1` (`SPEC.md:53`) |
-| F2 | Coproduct | DONE: `compiler/types.mech:111`, `compiler/checker.mech:57,1634` | DONE: `Sum A B` over built-in `sum` (`prelude/Prelude.asy:108-123`) |
-| F3 | Option | DONE: `compiler/types.mech:108` | DONE: `Option A := sum (prod (), A)` (`prelude/Prelude.asy:79-106`) |
-| F4 | List | DONE: `compiler/types.mech:109` | PARTIAL: one `mu` family for each element type; probe P2: a constructor of a family with a parameter cannot appear in a term (O8, `SPEC.md:267-275`) |
-| F5 | Monad | DONE over `Option`, `List`, `Sum E`: `compiler/checker.mech:60-65,591-745` | DONE for each carrier: `Option`, `Sum E`, each list family (`SPEC.md:67-70`) |
-| F6 | Algebra fold | DONE over `Nat`, `List A`, `Text`, `Values`, `Attrs` and `Value` (five functions): `compiler/checker.mech:802-1088,1661-1957` | PARTIAL: each list family has a structural `def rec`; no fold over `Nat`, because built-in `Nat` has no eliminator (`SPEC.md:71-73`) |
-| F7 | Algebra unfold | DONE into the same carriers, with a `Nat` step limit: `compiler/checker.mech:802-1088,1661-1957` | HOST-LIMIT: no structural measure and no `Nat` fuel (O9 RULED, `SPEC.md:276-279`) |
-| F8 | Filterable filter | DONE over `Option`, `List`, `Text`, `Values`, `Attrs`; no `Sum E` instance: `compiler/checker.mech:622-631` | DONE over `Option` and each list family; the test is `A -> Option (prod ())` (`SPEC.md:74-76`) |
-| F9 | Pi, not dependent | DONE: `compiler/program.mech:190` ("B cannot refer to a value parameter"), `SPEC.md:61-68` | DONE: built-in (`SPEC.md:55`) |
-| F10 | Pi, dependent | PLANNED: `docs/STATUS.md:133-137` | DONE in the kernel: `Aggregation F` (`SPEC.md:83-86,103`) |
-| F11 | Sigma | PLANNED: reserved names only (`compiler/types.mech:214`, `SPEC.md:39,183`) | PARTIAL: built, never projected; the kernel refuses Sigma eta and has no Sigma pattern, so records are `mu` families read by `match` (O10, `SPEC.md:280-288`) |
-| F12 | Eq refl, symm, trans | DONE: `compiler/checker.mech:67-122` | PARTIAL: one `Eq` family for each index type in `Type 0` (`EqNat`, `EqDec`, `EqTally`; `SPEC.md:57`) |
-| F13 | Eq transport, cong | PLANNED: reserved names (`compiler/types.mech:214`, `docs/STATUS.md:133-137`) | PARTIAL: one `transport` and one `cong` for each `Eq` family (`SPEC.md:57`) |
-| F14 | Universes | DONE: `compiler/parser.mech:69-83` | PARTIAL: `Type 0`; `Type 1` only as the type of a type function (`SPEC.md:58`) |
-| F15 | Indexed family | PARTIAL: domain only (`Ref k`, `compiler/parser.mech:186-190`); the generic former is PLANNED | DONE for a family with a fixed index type; no parameter (probe P2, `SPEC.md:60-62,103`) |
+| ID | Former | mech (ledger-lang 997fa7b) | assay (escrow-lang 279214c) | tcc-json (this repository) |
+|---|---|---|---|---|
+| F1 | Product | DONE: `compiler/runtime.mech:125`, `compiler/checker.mech:1-44` | DONE: built-in `prod`, `tuple`, `t.0`, `t.1` (`SPEC.md:53`) | DONE: `hosts/tcc-json/examples/formers.lang` |
+| F2 | Coproduct | DONE: `compiler/types.mech:111`, `compiler/checker.mech:57,1634` | DONE: `Sum A B` over built-in `sum` (`prelude/Prelude.asy:108-123`) | DONE: `hosts/tcc-json/examples/formers.lang` |
+| F3 | Option | DONE: `compiler/types.mech:108` | DONE: `Option A := sum (prod (), A)` (`prelude/Prelude.asy:79-106`) | DONE: `hosts/tcc-json/examples/formers.lang` |
+| F4 | List | DONE: `compiler/types.mech:109` | PARTIAL: one `mu` family for each element type; probe P2: a constructor of a family with a parameter cannot appear in a term (O8, `SPEC.md:267-275`) | DONE: `hosts/tcc-json/examples/formers.lang` |
+| F5 | Monad | DONE over `Option`, `List`, `Sum E`: `compiler/checker.mech:60-65,591-745` | DONE for each carrier: `Option`, `Sum E`, each list family (`SPEC.md:67-70`) | DONE over `Option`, `Sum E`, `List`: `hosts/tcc-json/examples/monad.lang` |
+| F6 | Algebra fold | DONE over `Nat`, `List A`, `Text`, `Values`, `Attrs` and `Value` (five functions): `compiler/checker.mech:802-1088,1661-1957` | PARTIAL: each list family has a structural `def rec`; no fold over `Nat`, because built-in `Nat` has no eliminator (`SPEC.md:71-73`) | DONE over `Nat`, `List` and each family: `hosts/tcc-json/examples/algebra.lang` |
+| F7 | Algebra unfold | DONE into the same carriers, with a `Nat` step limit: `compiler/checker.mech:802-1088,1661-1957` | HOST-LIMIT: no structural measure and no `Nat` fuel (O9 RULED, `SPEC.md:276-279`) | DONE into `List`, with a `Nat` step limit: `hosts/tcc-json/examples/algebra.lang` |
+| F8 | Filterable filter | DONE over `Option`, `List`, `Text`, `Values`, `Attrs`; no `Sum E` instance: `compiler/checker.mech:622-631` | DONE over `Option` and each list family; the test is `A -> Option (prod ())` (`SPEC.md:74-76`) | DONE over `Option` and `List`: `hosts/tcc-json/examples/monad.lang` |
+| F9 | Pi, not dependent | DONE: `compiler/program.mech:190` ("B cannot refer to a value parameter"), `SPEC.md:61-68` | DONE: built-in (`SPEC.md:55`) | DONE: `hosts/tcc-json/examples/functions.lang` |
+| F10 | Pi, dependent | PLANNED: `docs/STATUS.md:133-137` | DONE in the kernel: `Aggregation F` (`SPEC.md:83-86,103`) | DONE: `hosts/tcc-json/examples/functions.lang` |
+| F11 | Sigma | PLANNED: reserved names only (`compiler/types.mech:214`, `SPEC.md:39,183`) | PARTIAL: built, never projected; the kernel refuses Sigma eta and has no Sigma pattern, so records are `mu` families read by `match` (O10, `SPEC.md:280-288`) | DONE: `hosts/tcc-json/examples/sigma.lang` |
+| F12 | Eq refl, symm, trans | DONE: `compiler/checker.mech:67-122` | PARTIAL: one `Eq` family for each index type in `Type 0` (`EqNat`, `EqDec`, `EqTally`; `SPEC.md:57`) | DONE: `hosts/tcc-json/examples/equality.lang` |
+| F13 | Eq transport, cong | PLANNED: reserved names (`compiler/types.mech:214`, `docs/STATUS.md:133-137`) | PARTIAL: one `transport` and one `cong` for each `Eq` family (`SPEC.md:57`) | DONE: `hosts/tcc-json/examples/equality.lang` |
+| F14 | Universes | DONE: `compiler/parser.mech:69-83` | PARTIAL: `Type 0`; `Type 1` only as the type of a type function (`SPEC.md:58`) | DONE: `hosts/tcc-json/examples/universes.lang` |
+| F15 | Indexed family | PARTIAL: domain only (`Ref k`, `compiler/parser.mech:186-190`); the generic former is PLANNED | DONE for a family with a fixed index type; no parameter (probe P2, `SPEC.md:60-62,103`) | DONE: a family with parameters in `domain/` (R1): `hosts/tcc-json/domain/domain.lang` |
