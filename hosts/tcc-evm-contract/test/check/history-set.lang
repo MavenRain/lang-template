@@ -1,0 +1,4 @@
+-- REFUSE_HISTORY_WRITE: the history field earned is set to a literal.
+state State := makeState (held : U256) history (earned : U256)
+
+def reset : State -> State := fun (s : State) => makeState (held s) 0u

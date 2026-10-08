@@ -17,7 +17,8 @@ The TinyCC host kit of retainer-lang. It compiles the contract language to EVM b
 | K2 | U256 and Addr core types | Done |
 | K3a | Contract types: State, Env, Out, entries and views | Done |
 | K3b | `langc run` and call scripts | Done |
-| K3c to K5 | See the retainer-lang brief | Planned |
+| K3c | History rule: REFUSE_HISTORY_WRITE | Done |
+| K4 to K5 | See the retainer-lang brief | Planned |
 
 
 ## U256 and Addr (slice K2)
@@ -53,7 +54,7 @@ The helpers are in `src/front/u256.c`. They use no `__int128` and no shift by 64
 
 ## Contracts (slice K3)
 
-Slice K3a adds the contract types to the checker and the evaluator. Slice K3b adds `langc run` and call scripts. Slice K3c adds the history rule. K3c is planned.
+Slice K3a adds the contract types to the checker and the evaluator. Slice K3b adds `langc run` and call scripts. Slice K3c adds the history rule to `langc check`.
 
 The contract prelude is in `src/front/contract.c`. The front end loads it after `domain/domain.lang` and before the program. Its names are core names, thus a program cannot declare them again.
 
@@ -91,9 +92,21 @@ The type of a definition gives its role. There is no keyword for a role.
 - All other definitions are helpers.
 - `def init : State := TERM` gives the start state. The name `init` is fixed.
 
-`langc check` and `langc eval` do not find the role of a definition. For them, `init` is a normal definition. `langc run` finds the roles and the start state (slice K3b).
+`langc check` and `langc eval` do not find the role of a definition. For them, `init` is a normal definition, but the history rule of `langc check` (slice K3c) does not check the body of `init` and refuses a reference to `init` from a definition with `State` in its type. `langc run` finds the roles and the start state (slice K3b).
 
 `examples/contract.lang` has the state, `init`, the entries `deposit`, `withdraw` and `stamp`, the helper `checkpoint` and the view `balance`. `langc eval` prints a state in the constructor form, for example `makeState 0x00000000000000000000000000000000000000aa 0u 0u 0`. `langc abi` and `langc build` still stop with `langc: PLANNED: ...`.
+
+The history rule (slice K3c) makes sure that a call cannot make a history field less than before. `langc check` checks the rule on the core term of each definition, after it resolves the names. It does not check the body of `init` or of a definition with the type `State` after normalization, for example `initial` in `examples/state-aliases.lang`.
+
+- Each use of the state constructor has all of its arguments.
+- The argument for a history field `F` is `F t` or `ADD (F t) e`. `ADD` is `u256Add` for a `U256` field and `natAdd` for a `Nat` field. `t` and `e` can be any terms of the correct type.
+- A definition with `State` in its type cannot refer to `init` or to a definition with the type `State`, because a return of one of them can put a history field back to its start value. A definition without `State` in its type can refer to them, for example `savedEarned` in `examples/state-aliases.lang`.
+- The rule is strict. It refuses a literal (`0u`), a subtraction (`u256Sub (earned s) 1u`), the operands in the other order (`u256Add 1u (earned s)`), the constructor without all of its arguments (`makeState` alone), and a history value that goes through a `fun` binder. A binder with the name of a field, for example `fun (earned : U256) => ...`, is a local and not the field. A view with `State` in its type that refers to `init` or to a definition with the type `State` is also refused.
+- If a definition does not obey the rule, the checker gives `REFUSE_HISTORY_WRITE`.
+
+The checker treats unknown type variables conservatively as potentially containing `State`. This also prevents a dependent pair such as `Sigma (A : Type 0) A` from hiding a closed state in its payload.
+
+Why the rule is sound: each state in an entry comes from the input state, or from a constructor that keeps or adds to each history field of a state. A definition whose type cannot contain `State` cannot give a state to an entry. Thus each history field of the result is not less than the same field of the input. `u256Add` and `natAdd` trap on overflow, so a value cannot wrap. The test files are `test/check/history-*.lang`.
 
 `langc run PROG SCRIPT` checks the program `PROG`, gets the start state from `init`, and then does the calls in `SCRIPT` in sequence. Each line of a script is one call:
 
@@ -107,6 +120,7 @@ NOW CALLER NAME ARGS...
 - Spaces, tabs and carriage returns separate the words.
 - If the first word of a line starts with `--`, the line is a comment. The run ignores comments and blank lines.
 - Each call starts with the full fuel limit.
+- The start state also gets the full fuel limit. A NUL byte in a script line is a `RUN_SCRIPT` error.
 
 The output has one line for each call. The calls have the numbers 1, 2, 3 and so on. Comments and blank lines do not get a number. `test/run/basic.script` gives this output (`test/run/basic.out`):
 
@@ -134,7 +148,7 @@ The exit codes of `langc run`:
 - 0: the run did all the calls in the script.
 - 1: a check refusal or a script error. The run stops at the first bad line. The output lines of the calls before it stay on stdout.
   - `RUN_INIT`: the program has no state, it has no `def init : State`, or `init` has a trap.
-  - `RUN_SCRIPT`: a line has fewer than 3 words, or a bad `NOW` or `CALLER`. The message gives `SCRIPT:LINE`.
+  - `RUN_SCRIPT`: a line has fewer than 3 words, a bad `NOW` or `CALLER`, or a NUL byte. The message gives `SCRIPT:LINE`.
   - `EVAL_ENTRY`: `NAME` is not an entry or a view.
   - `EVAL_FUEL`, `EVAL_DEPTH` and `EVAL_PRINT` stop the run, as in `langc eval`.
 - 2: a usage error, an `IO` error for the script, or `EVAL_ARGS` (a bad argument or an incorrect number of arguments), as in `langc eval`.
@@ -143,7 +157,7 @@ The exit codes of `langc run`:
 
 - `make check`: the tcc build with `-Wall -Werror`, the clang syntax pass, `test/gate.sh`, `test/run.sh` and `test/asm.sh`. `test/asm.sh` needs geth `evm` on PATH.
 - `build/langc check FILE` and `build/langc eval FILE`: as in tcc-wasm.
-- `build/langc run PROG SCRIPT`: does the calls in `SCRIPT` on the program `PROG`. Refer to `## Contracts (slice K3)`. `test/run.sh` runs each `test/run/NAME.script` on `examples/contract.lang` and compares the output with `test/run/NAME.out`. It also has 7 refusal rows and a usage row.
+- `build/langc run PROG SCRIPT`: does the calls in `SCRIPT` on the program `PROG`. Refer to `## Contracts (slice K3)`. `test/run.sh` runs each `test/run/NAME.script` on `examples/contract.lang` and compares the output with `test/run/NAME.out`. It also has 8 refusal rows and a usage row. `build/runtool` checks fresh fuel for initialization and call classification.
 - `build/langc build FILE` stops with `langc: PLANNED: ...` until slice K4.
 - `build/asmtool`: the assembler self-test. `build/asmtool runtime|creation|abi` writes the test program or its ABI line.
 

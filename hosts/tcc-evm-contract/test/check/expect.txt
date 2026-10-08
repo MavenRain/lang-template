@@ -32,3 +32,11 @@ state-prod-fun.lang REFUSE_STATE
 state-alias-fun.lang REFUSE_STATE
 state-alias-nested-fun.lang REFUSE_STATE
 history-alias-option.lang REFUSE_STATE
+history-set.lang REFUSE_HISTORY_WRITE
+history-sub.lang REFUSE_HISTORY_WRITE
+history-swap.lang REFUSE_HISTORY_WRITE
+history-init.lang REFUSE_HISTORY_WRITE
+history-partial.lang REFUSE_HISTORY_WRITE
+history-shadow.lang REFUSE_HISTORY_WRITE
+history-closed.lang REFUSE_HISTORY_WRITE
+history-hidden.lang REFUSE_HISTORY_WRITE

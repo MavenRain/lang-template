@@ -1,0 +1,6 @@
+-- REFUSE_HISTORY_WRITE: reset has State in its type and refers to zero, a State definition that the history rule does not check.
+state State := makeState (held : U256) history (earned : U256)
+
+def Snapshot : Type 0 := State
+def zero : Snapshot := makeState 0u 0u
+def reset : State -> State := fun (s : State) => zero

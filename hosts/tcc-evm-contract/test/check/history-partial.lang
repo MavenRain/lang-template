@@ -1,0 +1,4 @@
+-- REFUSE_HISTORY_WRITE: the state constructor without all of its arguments.
+state State := makeState (held : U256) history (earned : U256)
+
+def mk : U256 -> U256 -> State := makeState

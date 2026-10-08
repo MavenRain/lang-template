@@ -1,0 +1,4 @@
+state State := makeState history (earned : U256)
+def init : State := makeState 0u
+def hidden : Sigma (A : Type 0) A := pack State init
+def reset : State -> State := fun (s : State) => payload hidden

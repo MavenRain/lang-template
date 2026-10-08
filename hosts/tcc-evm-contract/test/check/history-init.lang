@@ -1,0 +1,7 @@
+-- REFUSE_HISTORY_WRITE: an entry returns init, so earned goes back to its start value.
+state State := makeState (held : U256) history (earned : U256)
+
+def init : State := makeState 0u 0u
+
+def restart : (env : Env) -> (s : State) -> Option (Prod State (List Out)) :=
+  fun (env : Env) (s : State) => some (pair init nil)

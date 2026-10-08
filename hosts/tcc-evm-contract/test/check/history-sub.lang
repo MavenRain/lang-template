@@ -1,0 +1,4 @@
+-- REFUSE_HISTORY_WRITE: a subtraction from the history field earned.
+state State := makeState (held : U256) history (earned : U256)
+
+def take : State -> State := fun (s : State) => makeState (held s) (u256Sub (earned s) 1u)

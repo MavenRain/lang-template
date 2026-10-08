@@ -1,0 +1,4 @@
+-- REFUSE_HISTORY_WRITE: an add with the operands in the other order (the rule is strict).
+state State := makeState (held : U256) history (earned : U256)
+
+def bump : State -> State := fun (s : State) => makeState (held s) (u256Add 1u (earned s))

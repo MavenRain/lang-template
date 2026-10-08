@@ -1435,6 +1435,105 @@ static int check_family(Checker *c, const Decl *d) {
   return 1;
 }
 
+/* Rule D-9 (slice K3c). The argument A of the history field K of the state
+   constructor CTOR is `F t` or `ADD (F t) e`, with F the projection of the
+   field. ADD is natAdd or u256Add. The type of the field selects one of
+   the two, so this function does not compare them. */
+static int history_arg_ok(uint32_t ctor, uint32_t k, const Core *a) {
+  const Core *x = a->kind == CORE_OP && (a->op == OP_U256_ADD || a->op == OP_NAT_ADD) && a->argc == 2u ? a->args[0] : a;
+  return x->kind == CORE_OP && x->op == OP_PROJ && x->inst == ctor && x->field == k;
+}
+
+static int is_family(const Value *t, uint32_t family);
+
+/* Rule D-9 (USER ruling A). The rule does not check the body of init or of
+   a definition with the type State after normalization. */
+static int history_root(const Machine *m, uint32_t j) {
+  return strcmp(m->defs[j].name, "init") == 0 || is_family(m->defs[j].type, m->state_family);
+}
+
+/* 1 if the family State occurs in the type value V (USER ruling A). The
+   codomain of a Pi or a Sigma opens at a fresh level, as conv_values does.
+   A Lam, a stuck operation or an unknown type variable gives 1. A Sigma
+   payload may instantiate an unknown type with State. */
+static int mentions_state(Machine *m, uint32_t level, const Value *v) {
+  uint32_t i;
+  if (v == NULL)
+    return 1;
+  switch (v->kind) {
+  case VAL_NAT:
+  case VAL_WORD:
+  case VAL_TRAP:
+  case VAL_UNIV:
+    return 0;
+  case VAL_VAR:
+    return 1;
+  case VAL_PI:
+  case VAL_SIGMA:
+    return mentions_state(m, level, v->dom) || mentions_state(m, level + 1u, closure_apply(m, v, val_var(m, level)));
+  case VAL_APP:
+    return mentions_state(m, level, v->dom) || mentions_state(m, level, v->arg);
+  case VAL_LAM:
+  case VAL_STUCK:
+    return 1;
+  case VAL_OP:
+    break;
+  }
+  if (is_family(v, m->state_family))
+    return 1;
+  for (i = 0; i < v->argc; i++) {
+    if (mentions_state(m, level, v->args[i]))
+      return 1;
+  }
+  return 0;
+}
+
+/* Rule D-9 (slice K3c) on the core term T of a definition. The names are
+   resolved, so a binder with the name of a field is a local and not the
+   field. Each use of the state constructor has all of its arguments and
+   keeps or adds to each history field. TYPED is 1 when State occurs in the
+   type of the definition: then T cannot refer to a definition that the rule
+   does not check (history_root). */
+static int history_ok(Checker *c, const Core *t, int typed) {
+  const Machine *m = c->m;
+  uint32_t i;
+  if (t == NULL || !m->has_state)
+    return 1;
+  switch (t->kind) {
+  case CORE_VAR:
+  case CORE_NAT:
+  case CORE_WORD:
+  case CORE_TRAP:
+  case CORE_UNIV:
+    return 1;
+  case CORE_GLOBAL:
+    if (typed && history_root(m, t->index))
+      return FAIL(c, "REFUSE_HISTORY_WRITE", "a definition with State in its type cannot refer to %s, because the history rule does not check %s (rule D-9)", m->defs[t->index].name, m->defs[t->index].name);
+    return 1;
+  case CORE_LAM:
+  case CORE_PI:
+  case CORE_SIGMA:
+  case CORE_APP:
+    return history_ok(c, t->a, typed) && history_ok(c, t->b, typed);
+  case CORE_OP:
+    break;
+  }
+  if (t->op == OP_CTOR && m->ctors[t->inst].family == m->state_family) {
+    const CtorInfo *ci = &m->ctors[t->inst];
+    if (t->argc < ci->field_count)
+      return FAIL(c, "REFUSE_HISTORY_WRITE", "%s must have all of its arguments (rule D-9)", ci->name);
+    for (i = 0; i < ci->field_count; i++) {
+      if (ci->fields[i].history && !history_arg_ok(t->inst, i, t->args[t->argc - ci->field_count + i]))
+        return FAIL(c, "REFUSE_HISTORY_WRITE", "the history field %s must be (%s t) or ADD (%s t) e, with ADD u256Add or natAdd (rule D-9)", ci->fields[i].name, ci->fields[i].name, ci->fields[i].name);
+    }
+  }
+  for (i = 0; i < t->argc; i++) {
+    if (!history_ok(c, t->args[i], typed))
+      return 0;
+  }
+  return 1;
+}
+
 static int check_def(Checker *c, const Decl *d) {
   Machine *m = c->m;
   uint64_t level = 0;
@@ -1443,6 +1542,8 @@ static int check_def(Checker *c, const Decl *d) {
   const Core *body = check(c, d->body, tv);
   DefInfo *info = &m->defs[m->def_count];
   if (body == NULL)
+    return 0;
+  if (strcmp(d->name, "init") != 0 && !is_family(tv, m->state_family) && !history_ok(c, body, mentions_state(m, c->level, tv)))
     return 0;
   info->name = d->name;
   info->origin = d->origin;
@@ -1828,6 +1929,7 @@ static int run_call(Machine *m, Run *r, uint32_t line, char *const *word, uint32
     return diag_fail(m->diag, "RUN_SCRIPT", NULL, "%s:%u: NOW '%s' is not a Nat", r->path, line, word[0]) + 1;
   if (!parse_word(word[1], WORD_ADDR, caller))
     return diag_fail(m->diag, "RUN_SCRIPT", NULL, "%s:%u: CALLER '%s' is not an Addr (0x and 40 hex digits)", r->path, line, word[1]) + 1;
+  m->fuel = EVAL_FUEL_STEPS;
   m->def = name;
   if (d == NO_DEF)
     return diag_fail(m->diag, "EVAL_ENTRY", name, "%s:%u: no definition has this name", r->path, line) + 1;
@@ -1841,7 +1943,6 @@ static int run_call(Machine *m, Run *r, uint32_t line, char *const *word, uint32
     if (args[i] == NULL)
       return strcmp(m->diag->code != NULL ? m->diag->code : "", "EVAL_ARGS") == 0 ? 2 : 1;
   }
-  m->fuel = EVAL_FUEL_STEPS;
   v = apply_value(m, apply_value(m, def_value(m, d), make_env(m, r, now, caller)), r->state);
   for (i = 0; i < call.param_count; i++)
     v = apply_value(m, v, args[i]);
@@ -1909,6 +2010,7 @@ int run_command(Machine *m, const char *path, const char *text, size_t len, FILE
     return diag_fail(m->diag, "RUN_INIT", NULL, "a run needs a state and def init : State") + 1;
   if (r.buf == NULL)
     return diag_fail(m->diag, "OOM", NULL, "out of memory") + 1;
+  m->fuel = EVAL_FUEL_STEPS;
   r.state = def_value(m, init);
   if (r.state == NULL)
     return 1;
@@ -1920,6 +2022,8 @@ int run_command(Machine *m, const char *path, const char *text, size_t len, FILE
     uint32_t count;
     while (end < len && text[end] != '\n')
       end++;
+    if (memchr(text + pos, '\0', end - pos) != NULL)
+      return diag_fail(m->diag, "RUN_SCRIPT", NULL, "%s:%u: a script line contains a NUL byte", r.path, line + 1u) + 1;
     copy = arena_alloc(m->arena, end - pos + 1u);
     if (copy == NULL)
       return diag_fail(m->diag, "OOM", NULL, "out of memory") + 1;

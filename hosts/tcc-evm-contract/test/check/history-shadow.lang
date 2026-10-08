@@ -1,0 +1,4 @@
+-- REFUSE_HISTORY_WRITE: the binder earned hides the field earned, so the argument is not the field.
+state State := makeState (held : U256) history (earned : U256)
+
+def keep : State -> U256 -> State := fun (s : State) (earned : U256) => makeState (held s) earned

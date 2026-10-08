@@ -41,6 +41,21 @@ run_refused 2 EVAL_ARGS examples/contract.lang "1 $caller deposit 5u 6u"
 run_refused 1 EVAL_ENTRY examples/contract.lang "1 $caller checkpoint init 7u"
 run_refused 1 EVAL_ENTRY examples/contract.lang "1 $caller nope"
 run_refused 1 RUN_INIT examples/entries.lang "1 $caller addPrice 1 2"
+
+# A NUL cannot hide extra words. Calls before the bad line keep their output.
+printf '1 %s balance\n2 %s deposit 5u\000 6u\n' "$caller" "$caller" >"$tmp/bad.script"
+status=0
+build/langc run examples/contract.lang "$tmp/bad.script" >"$tmp/out" 2>"$tmp/err" || status=$?
+printf '1 balance = 0u\n' >"$tmp/want"
+refused=$((refused + 1))
+case "$status:$(head -n 1 "$tmp/err")" in
+  "1:langc: RUN_SCRIPT: -: $tmp/bad.script:2: "*)
+    if ! cmp -s "$tmp/want" "$tmp/out"; then
+      echo 'FAIL run NUL: output must stop before the malformed call'
+      fail=$((fail + 1))
+    fi ;;
+  *) echo "FAIL run NUL: want exit 1 and RUN_SCRIPT, got exit $status"; fail=$((fail + 1)) ;;
+esac
 echo "run refusals: $refused checked"
 
 status=0
