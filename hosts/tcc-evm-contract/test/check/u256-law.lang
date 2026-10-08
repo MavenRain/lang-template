@@ -1,0 +1,1 @@
+def k2Bad : Eq U256 (u256Add 2u 3u) 6u := refl

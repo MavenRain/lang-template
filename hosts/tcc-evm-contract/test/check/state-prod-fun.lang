@@ -1,0 +1,2 @@
+-- REFUSE_STATE: a function type inside Prod is not first order.
+state State := makeState (held : U256) (mixed : Prod Nat (Nat -> Nat))

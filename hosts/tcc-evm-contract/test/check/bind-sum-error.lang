@@ -1,0 +1,2 @@
+def input : Sum Nat Nat := inl 7
+def bad : Sum Flag Nat := bind input (fun x => inr x)

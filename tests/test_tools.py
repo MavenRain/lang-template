@@ -132,6 +132,24 @@ class GeneratorTests(unittest.TestCase):
         self.assertIn("Run the gate in", result.stdout)
         self.assertIn(": make check\n", result.stdout)
 
+    def test_tcc_evm_contract_host(self):
+        kit = self.template / "hosts" / "tcc-evm-contract"
+        (kit / "src").mkdir(parents=True)
+        (kit / "docs").mkdir()
+        (kit / "README.md").write_text("Host guide\n")
+        (kit / "FORMERS.md").write_text("Host formers\n")
+        (kit / "docs/CAPABILITY.md").write_text("Host probe\n")
+        (kit / "src/evm.c").write_text('static const char LANG_NAME[] = "{{LANG}}";\n')
+        result = run("bash", str(self.template / "bin/new-lang.sh"),
+                     "example-lang", "tcc-evm-contract", str(self.dest))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.dest / "formers/tcc-evm-contract.md").read_text(), "Host formers\n")
+        self.assertEqual((self.dest / "docs/host/README.md").read_text(), "Host guide\n")
+        self.assertEqual((self.dest / "docs/host/CAPABILITY.md").read_text(), "Host probe\n")
+        self.assertEqual((self.dest / "src/evm.c").read_text(),
+                         'static const char LANG_NAME[] = "example-lang";\n')
+        self.assertIn(": make check\n", result.stdout)
+
     def test_unknown_host_is_rejected(self):
         result = run("bash", str(self.template / "bin/new-lang.sh"),
                      "example-lang", "nohost", str(self.dest))

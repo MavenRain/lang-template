@@ -17,6 +17,11 @@ check: doc-check test
 	else \
 	  echo "check: skip hosts/tcc-json (no Makefile)"; \
 	fi
+	@if [ -f hosts/tcc-evm-contract/Makefile ]; then \
+	  $(MAKE) -C hosts/tcc-evm-contract check; \
+	else \
+	  echo "check: skip hosts/tcc-evm-contract (no Makefile)"; \
+	fi
 
 # Fail on an em-dash or en-dash in a Markdown file, or on a malformed placeholder.
 doc-check:

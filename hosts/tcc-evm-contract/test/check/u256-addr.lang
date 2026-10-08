@@ -1,0 +1,2 @@
+def k2Who : Addr := 0x00000000000000000000000000000000000000ff
+def k2Bad : U256 := u256Add k2Who 1u

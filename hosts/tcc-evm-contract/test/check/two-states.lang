@@ -1,0 +1,3 @@
+-- REFUSE_STATE: a program has more than one state declaration.
+state State := makeState (owner : Addr)
+state State := makeState (held : U256)

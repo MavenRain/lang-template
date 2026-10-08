@@ -1,0 +1,37 @@
+-- Contracts (kit slice K3a): the state, the start state, entries, a helper and a view.
+-- The contract prelude gives Env (now, caller) and Out (pay, pull, emit).
+state State := makeState (owner : Addr) (held : U256) history (earned : U256) (cursor : Nat)
+
+def asset : Addr := 0x00000000000000000000000000000000000000ee
+def vault : Addr := 0x00000000000000000000000000000000000000cc
+
+-- The start state of `langc run` (K3b).
+def init : State := makeState 0x00000000000000000000000000000000000000aa 0u 0u 0
+
+-- Entry: pull the amount from the caller into the vault.
+def deposit : (env : Env) -> (s : State) -> (amount : U256) -> Option (Prod State (List Out)) :=
+  fun (env : Env) (s : State) (amount : U256) =>
+    some (pair (makeState (owner s) (u256Add (held s) amount) (earned s) (cursor s))
+      (cons (pull asset (caller env) vault amount) nil))
+
+-- Entry: pay the amount to the owner. Revert (none) when the amount is above held.
+def withdraw : (env : Env) -> (s : State) -> (amount : U256) -> Option (Prod State (List Out)) :=
+  fun (env : Env) (s : State) (amount : U256) =>
+    flagIf (u256Le amount (held s))
+      (some (pair (makeState (owner s) (u256Sub (held s) amount) (u256Add (earned s) amount) (cursor s))
+        (cons (pay asset (owner s) amount) nil)))
+      none
+
+-- Entry with no arguments: record the time and emit held and earned.
+def stamp : (env : Env) -> (s : State) -> Option (Prod State (List Out)) :=
+  fun (env : Env) (s : State) =>
+    some (pair (makeState (owner s) (held s) (earned s) (now env))
+      (cons (emit 1 (cons (held s) (cons (earned s) nil))) nil))
+
+-- Helper (no Env): add to the history field earned.
+def checkpoint : State -> U256 -> State :=
+  fun (s : State) (x : U256) => makeState (owner s) (held s) (u256Add (earned s) x) (cursor s)
+def checked : State := checkpoint init 7u
+
+-- View.
+def balance : (env : Env) -> (s : State) -> U256 := fun (env : Env) (s : State) => held s

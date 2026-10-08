@@ -1,0 +1,1 @@
+def k2Short : Addr := 0x123

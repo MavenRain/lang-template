@@ -1,0 +1,2 @@
+-- REFUSE_STATE: the state type must have the name State.
+state Store := makeStore (storeCount : Nat)

@@ -1,0 +1,3 @@
+def input : Sum Nat Nat := inl 7
+def continuation : Nat -> Sum Flag Nat := fun x => inr x
+def bad : Flag := either (fun b => b) (fun n => flagNo) (bind input continuation)

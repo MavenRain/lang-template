@@ -1,0 +1,2 @@
+-- PARSE_EXPECT: a state declaration needs a constructor after ':='.
+state State :=
