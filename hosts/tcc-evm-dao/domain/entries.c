@@ -6,6 +6,7 @@
  * payee and amount (slots 2, 3 and 4, index -> word). A mapping entry
  * lives at keccak256(key . slot), as in Solidity. */
 #include "asm.h"
+#include "check.h"
 
 enum { SLOT_LEDGER = 0, SLOT_COUNT = 1, SLOT_PAYER = 2, SLOT_PAYEE = 3, SLOT_AMOUNT = 4 };
 
@@ -136,4 +137,29 @@ const Entry *lang_domain_entries(LangRegime regime, size_t *count) {
   }
   *count = 0;
   return NULL;
+}
+
+/* The sample domain writes no genesis storage. */
+void lang_domain_genesis(Asm *a, const LangContract *contract) {
+  (void)a;
+  (void)contract;
+}
+
+/* The sample domain has no code data. */
+void lang_domain_data(Asm *a, const EntryContext *c) {
+  (void)a;
+  (void)c;
+}
+
+/* The sample domain reads no program data: the contract gets NULL. */
+int lang_domain_read(LangChecked *checked, const LangDomainData **data) {
+  (void)checked;
+  *data = NULL;
+  return LANG_EXIT_OK;
+}
+
+/* The sample domain has no program data, so the `data` verb writes nothing. */
+void lang_domain_print(const LangDomainData *data, FILE *out) {
+  (void)data;
+  (void)out;
 }

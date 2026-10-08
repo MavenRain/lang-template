@@ -3,9 +3,9 @@
  * evaluation and the typing context; a name resolves to the locals first,
  * then to the globals declared so far. Evaluation is call by value and
  * unfolds every def. A def rec unfolds when it has all its arguments and
- * the decreasing one is a saturated constructor; natAdd, natSub, natEq and
- * natLt reduce on literals. After the first error every function returns
- * at once. */
+ * the decreasing one is a saturated constructor; natAdd, natSub, natMul,
+ * natDiv, natMod, natEq and natLt reduce on literals. After the first error
+ * every function returns at once. */
 #include "check.h"
 #include <limits.h>
 #include <stdint.h>
@@ -32,7 +32,7 @@ typedef enum {
 } ValueKind;
 
 typedef enum { G_DEF, G_REC, G_MU, G_CTOR, G_PRIM } GlobalKind;
-typedef enum { P_ADD, P_SUB, P_EQ, P_LT } Prim;
+typedef enum { P_ADD, P_SUB, P_MUL, P_DIV, P_MOD, P_EQ, P_LT } Prim;
 typedef enum { F_APP, F_PROJ, F_CASE, F_MATCH } FrameKind;
 
 struct Bind {
@@ -380,6 +380,13 @@ static Value *prim(C *c, Prim p, Value *a, Value *b, Value *stuck) {
       return fail(c, "TYPE_NAT", c->loc, "natAdd %llu %llu overflows", a->nat, b->nat);
     return mk_nat(c, a->nat + b->nat);
   case P_SUB: return mk_nat(c, a->nat > b->nat ? a->nat - b->nat : 0);
+  case P_MUL:
+    if (b->nat != 0 && a->nat > ULLONG_MAX / b->nat)
+      return fail(c, "TYPE_NAT", c->loc, "natMul %llu %llu overflows", a->nat, b->nat);
+    return mk_nat(c, a->nat * b->nat);
+  /* As the EVM DIV and MOD: a divisor of 0 gives 0. */
+  case P_DIV: return mk_nat(c, b->nat == 0 ? 0 : a->nat / b->nat);
+  case P_MOD: return mk_nat(c, b->nat == 0 ? 0 : a->nat % b->nat);
   case P_EQ: return mk_bool(c, a->nat == b->nat);
   case P_LT: return mk_bool(c, a->nat < b->nat);
   }
@@ -1320,6 +1327,9 @@ static void builtins(C *c) {
   g->value = nat;
   prim_global(c, "natAdd", P_ADD, mk_two(c, V_PI, nat, mk_two(c, V_PI, nat, nat)));
   prim_global(c, "natSub", P_SUB, mk_two(c, V_PI, nat, mk_two(c, V_PI, nat, nat)));
+  prim_global(c, "natMul", P_MUL, mk_two(c, V_PI, nat, mk_two(c, V_PI, nat, nat)));
+  prim_global(c, "natDiv", P_DIV, mk_two(c, V_PI, nat, mk_two(c, V_PI, nat, nat)));
+  prim_global(c, "natMod", P_MOD, mk_two(c, V_PI, nat, mk_two(c, V_PI, nat, nat)));
   prim_global(c, "natEq", P_EQ, mk_two(c, V_PI, nat, mk_two(c, V_PI, nat, truth)));
   prim_global(c, "natLt", P_LT, mk_two(c, V_PI, nat, mk_two(c, V_PI, nat, truth)));
 }

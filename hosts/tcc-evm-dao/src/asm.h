@@ -20,20 +20,22 @@ enum {
 };
 
 typedef enum {
-  OP_ADD = 0x01, OP_MUL = 0x02, OP_SUB = 0x03, OP_LT = 0x10, OP_GT = 0x11,
-  OP_EQ = 0x14, OP_SHR = 0x1c, OP_SHA3 = 0x20, OP_CALLVALUE = 0x34,
+  OP_ADD = 0x01, OP_MUL = 0x02, OP_SUB = 0x03, OP_DIV = 0x04, OP_MOD = 0x06,
+  OP_LT = 0x10, OP_GT = 0x11, OP_EQ = 0x14, OP_ISZERO = 0x15, OP_AND = 0x16,
+  OP_SHR = 0x1c, OP_SHA3 = 0x20, OP_CALLER = 0x33, OP_CALLVALUE = 0x34,
   OP_CALLDATALOAD = 0x35, OP_CALLDATASIZE = 0x36, OP_CODECOPY = 0x39,
   OP_POP = 0x50, OP_MLOAD = 0x51, OP_MSTORE = 0x52, OP_SLOAD = 0x54,
-  OP_SSTORE = 0x55, OP_JUMP = 0x56, OP_JUMPI = 0x57, OP_JUMPDEST = 0x5b,
-  OP_PUSH0 = 0x5f, OP_PUSH1 = 0x60, OP_PUSH2 = 0x61, OP_PUSH4 = 0x63,
-  OP_DUP1 = 0x80, OP_DUP2 = 0x81, OP_SWAP1 = 0x90, OP_SWAP2 = 0x91,
-  OP_RETURN = 0xf3, OP_REVERT = 0xfd
+  OP_SSTORE = 0x55, OP_JUMP = 0x56, OP_JUMPI = 0x57, OP_GAS = 0x5a,
+  OP_JUMPDEST = 0x5b, OP_PUSH0 = 0x5f, OP_PUSH1 = 0x60, OP_PUSH2 = 0x61,
+  OP_PUSH4 = 0x63, OP_DUP1 = 0x80, OP_DUP2 = 0x81, OP_DUP3 = 0x82,
+  OP_DUP4 = 0x83, OP_SWAP1 = 0x90, OP_SWAP2 = 0x91, OP_SWAP3 = 0x92,
+  OP_CALL = 0xf1, OP_RETURN = 0xf3, OP_REVERT = 0xfd
 } Op;
 
 /* A jump label. The labels below LABEL_FREE belong to the core; asm_label
  * gives the others (one per entry, and the labels of an entry body). */
 typedef unsigned Label;
-enum { LABEL_REVERT, LABEL_TABLE, LABEL_RUNTIME, LABEL_FREE };
+enum { LABEL_REVERT, LABEL_TABLE, LABEL_RUNTIME, LABEL_DATA, LABEL_FREE };
 
 typedef enum { ENTRY_PAYABLE, ENTRY_NONPAYABLE } Payment;
 
@@ -57,6 +59,7 @@ typedef struct {
   unsigned members;             /* n */
   unsigned decisions;           /* Debreu: k; impossibility: 0 */
   const unsigned char *packed;  /* Debreu: the amend word; impossibility: NULL */
+  const LangDomainData *data;   /* the program data (evm.h); NULL: the defaults */
 } EntryContext;
 
 /* One external entry, name(uint256 x (words + n when ballots)). The core
@@ -75,6 +78,13 @@ const Entry *lang_domain_entries(LangRegime regime, size_t *count);
 /* The core entries, for the Debreu list: cast (n ballots) and amend (0 words). */
 void lang_entry_cast(Asm *a, const EntryContext *c);
 void lang_entry_amend(Asm *a, const EntryContext *c);
+
+/* domain/entries.c: the genesis storage writes of the creation code, before
+ * the runtime copy. */
+void lang_domain_genesis(Asm *a, const LangContract *contract);
+/* domain/entries.c: the code data of the runtime, at LABEL_DATA, after the
+ * entries and the verdict table, so that no data byte precedes code. */
+void lang_domain_data(Asm *a, const EntryContext *c);
 
 Label asm_label(Asm *a);
 void asm_put(Asm *a, unsigned value);

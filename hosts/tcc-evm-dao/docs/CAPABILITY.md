@@ -38,8 +38,10 @@ prelude is written to them.
   `Config`, `Tally` and `Aggregation F` are `mu` records read by `match`.
   The Sigma forms (`IsSelfConstituting`, `EscrowDAO`, `Le`) are built and
   not projected.
-- `Nat` is a 64-bit word. `natAdd 18446744073709551615 1` is refused with
-  `TYPE_NAT` (`test/refusal.sh`).
+- `Nat` is a 64-bit word. `natAdd 18446744073709551615 1` and
+  `natMul 4294967296 4294967296` are refused with `TYPE_NAT`
+  (`test/refusal.sh`). `natDiv` and `natMod` give 0 for a divisor of 0, as
+  the EVM `DIV` and `MOD` (`test/check.sh`).
 
 ## Limits
 

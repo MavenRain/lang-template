@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import shutil
 import signal
@@ -150,8 +151,9 @@ class GeneratorTests(unittest.TestCase):
                          'static const char LANG_NAME[] = "example-lang";\n')
         self.assertIn(": make check\n", result.stdout)
 
-    def test_tcc_wasm_and_tcc_evm_hosts(self):
-        for host, target in (("tcc-wasm", "src/wasm.c"), ("tcc-evm", "src/evm.c")):
+    def test_tcc_wasm_tcc_evm_and_tcc_evm_dao_hosts(self):
+        for host, target in (("tcc-wasm", "src/wasm.c"), ("tcc-evm", "src/evm.c"),
+                             ("tcc-evm-dao", "src/evm.c")):
             with self.subTest(host=host):
                 kit = self.template / "hosts" / host
                 (kit / "src").mkdir(parents=True)
@@ -172,10 +174,28 @@ class GeneratorTests(unittest.TestCase):
                 self.assertIn(": make check\n", result.stdout)
 
     def test_unknown_host_is_rejected(self):
-        result = run("bash", str(self.template / "bin/new-lang.sh"),
-                     "example-lang", "nohost", str(self.dest))
+        for host in ("nohost", "mech assay", "", "tcc", "tcc-evm ", "../mech"):
+            with self.subTest(host=host):
+                # A kit directory exists for each name, so only the HOST check can refuse it.
+                (self.template / "hosts" / host).mkdir(parents=True, exist_ok=True)
+                result = run("bash", str(self.template / "bin/new-lang.sh"),
+                             "example-lang", host, str(self.dest))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(f"new-lang: unknown HOST '{host}': use ", result.stderr)
+                self.assertFalse(self.dest.exists())
+
+    def test_host_without_gate_arm_is_refused(self):
+        script = self.template / "bin/new-lang.sh"
+        text = script.read_text()
+        self.assertIn("\nhosts=(mech ", text)
+        script.write_text(text.replace("\nhosts=(mech ", "\nhosts=(tcc-new mech ", 1))
+        kit = self.template / "hosts" / "tcc-new"
+        kit.mkdir()
+        (kit / "README.md").write_text("Host guide\n")
+        (kit / "FORMERS.md").write_text("Host formers\n")
+        result = run("bash", str(script), "example-lang", "tcc-new", str(self.dest))
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("unknown HOST", result.stderr)
+        self.assertIn("new-lang: HOST 'tcc-new' has no gate command", result.stderr)
         self.assertFalse(self.dest.exists())
 
     def test_tcc_json_document_key_is_reserved(self):
@@ -186,16 +206,43 @@ class GeneratorTests(unittest.TestCase):
         self.assertFalse(self.dest.exists())
 
 
+class HostListTests(unittest.TestCase):
+    """bin/new-lang.sh keeps its hosts in one array."""
+
+    def hosts(self):
+        lines = re.findall(r"^hosts=\(([^)]*)\)$",
+                           (ROOT / "bin/new-lang.sh").read_text(), re.MULTILINE)
+        self.assertEqual(len(lines), 1, lines)
+        return lines[0].split()
+
+    def test_each_host_has_a_kit(self):
+        # A kit can exist in hosts/ before it is in the array, so the test
+        # does not compare the array with the directories.
+        hosts = self.hosts()
+        self.assertEqual(len(hosts), len(set(hosts)), hosts)
+        for host in hosts:
+            with self.subTest(host=host):
+                self.assertTrue((ROOT / "hosts" / host).is_dir())
+
+    def test_usage_lists_exactly_the_hosts(self):
+        result = run("bash", str(ROOT / "bin/new-lang.sh"))
+        self.assertEqual(result.returncode, 2, result.stderr)
+        lines = [line for line in result.stderr.splitlines() if line.startswith("  HOST  ")]
+        self.assertEqual(len(lines), 1, result.stderr)
+        head, last = lines[0][len("  HOST  "):].rsplit(" or ", 1)
+        self.assertEqual(head.split(", ") + [last], self.hosts())
+
+
 class TccKitTests(unittest.TestCase):
     """Make a language from each real TinyCC kit and run its own gate."""
 
-    def generate_and_check(self, host, target):
+    def generate_and_check(self, host, *kit_files):
         with tempfile.TemporaryDirectory() as temp:
             dest = Path(temp) / "example-lang"
             result = run("bash", str(ROOT / "bin/new-lang.sh"), "example-lang", host, str(dest))
             self.assertEqual(result.returncode, 0, result.stderr)
             for path in (f"formers/{host}.md", "docs/host/README.md", "docs/host/CAPABILITY.md",
-                         "domain/domain.lang", target, "Makefile", "PIN"):
+                         "domain/domain.lang", "Makefile") + kit_files:
                 self.assertTrue((dest / path).is_file(), path)
             self.assertFalse((dest / "build").exists())
             gate = subprocess.run(("make", "-C", str(dest), "check"), text=True,
@@ -203,10 +250,13 @@ class TccKitTests(unittest.TestCase):
             self.assertEqual(gate.returncode, 0, gate.stdout[-4000:] + gate.stderr[-4000:])
 
     def test_tcc_wasm_language_passes_its_gate(self):
-        self.generate_and_check("tcc-wasm", "src/wasm.c")
+        self.generate_and_check("tcc-wasm", "src/wasm.c", "PIN")
 
     def test_tcc_evm_language_passes_its_gate(self):
-        self.generate_and_check("tcc-evm", "src/evm.c")
+        self.generate_and_check("tcc-evm", "src/evm.c", "PIN")
+
+    def test_tcc_evm_dao_language_passes_its_gate(self):
+        self.generate_and_check("tcc-evm-dao", "src/evm.c")
 
 
 @unittest.skipUnless(sys.platform == "darwin", "guard uses macOS libproc")

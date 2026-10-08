@@ -36,7 +36,8 @@ generated language). "host CAPABILITY.md" is `docs/CAPABILITY.md`
 | `langc table PROG` | Prints the regime, the member count and the decision code of each tally, on one line. |
 | `langc verdicts PROG NAME` | Prints one decision code for each ballot vector of the ChoiceRule `NAME`, compact digits for k <= 9 or space-separated decimal codes for k >= 10. |
 | `langc eval PROG NAME` | Prints the normal form of `NAME`. |
-| `langc build PROG [--runtime] -o OUT` | Checks the program and writes the creation code (or the runtime code with `--runtime`) to `OUT` as lowercase hex, without `0x`, with a final newline. `--runtime` comes before `-o`. |
+| `langc data PROG` | Prints the program data that the domain reads (`lang_domain_print`, The domain). The sample domain reads no program data, so it prints nothing. |
+| `langc build PROG [--runtime] -o OUT` | Checks the program and writes the creation code (or the runtime code with `--runtime`) to `OUT` as lowercase hex, without `0x`, with a final newline. `--runtime` comes before `-o`. The code goes to a temporary file first, so a refused build does not change `OUT`. An `OUT` that is the source file (also through a link) is an `IO_WRITE` error. |
 
 Exit 0 is success. Exit 1 is a refused program. Exit 2 is a usage or IO
 error. A refusal writes one line to stderr: `langc: CODE: NAME: message`.
@@ -47,12 +48,13 @@ error. A refusal writes one line to stderr: `langc: CODE: NAME: message`.
 |---|---|---|
 | `src/` | core | Lexer, parser, printer, checker (`check.c`), EVM core (`evm.c`), the assembler API for domains (`asm.h`), keccak, arena, diagnostics |
 | `domain/domain.lang` | domain | The prelude: the types and operations of the language. `gen/embed.c` embeds it in `build/langc` at build time. |
-| `domain/entries.c` | domain | The storage layout and the contract entries of each regime |
+| `domain/entries.c` | domain | The storage layout, the contract entries of each regime and the program data hooks |
 | `examples/` | sample | The two sample programs, one for each regime |
 | `test/` | gate | `test/gate.sh` and its tests |
 
 A new language edits `domain/domain.lang` and `domain/entries.c`. It does
-not edit `src/`.
+not edit `src/`, except for a program data reader that needs the checker
+internals (The domain).
 
 ## The domain
 
@@ -93,13 +95,41 @@ table.
 The core writes the dispatcher, then for each entry a head (callvalue
 guard unless payable, calldata size check), then calls `emit`. An unknown
 selector reverts. `emit` gets an `EntryContext`: `members` (n), `decisions`
-(k, or 0 in Arrow-impossibility) and `packed` (the amend word, Arrow-Debreu
-only). The core entries `lang_entry_cast` and `lang_entry_amend` can go in
-a list. The `asm_*` helpers of `src/asm.h` write opcodes, pushes, labels
+(k, or 0 in Arrow-impossibility), `packed` (the amend word, Arrow-Debreu
+only) and `data` (the program data, below). The core entries
+`lang_entry_cast` and `lang_entry_amend` can go in a list. The `asm_*` helpers of `src/asm.h` write opcodes, pushes, labels
 (64 for each contract), jumps, calldata words, mapping slots
 (keccak(key . slot)), checked addition, memory words, an address guard and
 `asm_tally` (the decision code of the n ballots from the verdict table).
 Memory 0x00 to 0x3f is core scratch. A domain uses 0x80 and up.
+
+The program data of a domain is data that the program gives and the
+contract keeps, for example a genesis ledger. The core does not know its
+form. `src/evm.h` declares `LangDomainData`, and the domain defines the
+struct. The core passes only a pointer (`LangContract.data` and
+`EntryContext.data`). `domain/entries.c` gives four hooks:
+
+- `lang_domain_read(checked, &data)` (`src/check.h`) reads the data from
+  the checked program. `langc data` and `langc build` call it after the
+  check. NULL data means the defaults of the domain.
+- `lang_domain_print(data, out)` (`src/check.h`) writes the data for
+  `langc data`.
+- `lang_domain_genesis(a, contract)` (`src/asm.h`) writes the genesis
+  storage writes of the creation code, before the runtime copy.
+- `lang_domain_data(a, c)` (`src/asm.h`) writes code data at `LABEL_DATA`,
+  after the entries and the verdict table, so that no data byte comes
+  before code.
+
+The sample domain reads no program data. Its `lang_domain_read` gives
+NULL, and the other three hooks write nothing. `src/check.h` gives the
+reader only the public checker calls. A reader that must evaluate program
+definitions goes in `src/check.c`. interest-lang at commit a2ce1b8 (`lang_data` in its `src/check.c`) is an
+example.
+
+The checker reduces the Nat built-ins `natAdd`, `natSub`, `natMul`,
+`natDiv`, `natMod`, `natEq` and `natLt` on literals. `natAdd` and `natMul`
+refuse an overflow with `TYPE_NAT`. `natSub` stops at 0. As the EVM `DIV`
+and `MOD`, `natDiv` and `natMod` give 0 for a divisor of 0.
 
 `test/domains/k4.lang` and `test/domains/decision-arg.lang` are the sample
 prelude with a fourth decision value (nullary, then with an argument).
@@ -153,7 +183,9 @@ each checker error.
 
 `make check` builds `build/langc`, `build/parsetool` and the test domain
 compilers, runs `make check-clang`, then `test/gate.sh`. The gate runs, in
-order: `test/parse.sh`, `test/embed-safety.sh`, `test/check.sh`, `test/refusal.sh`,
+order: `test/parse.sh`, `test/embed-safety.sh`, `test/check.sh`,
+`test/build-output.sh` (a refused build and a source alias keep the files),
+`test/refusal.sh`,
 `test/normal-forms.py`, `test/differential.py` (k = 3, geth against
 `langc table` and `langc verdicts`), `test/domains.sh`,
 `test/differential.py --langc build/k4/langc --decisions 4 --program

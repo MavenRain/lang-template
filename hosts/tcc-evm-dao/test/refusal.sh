@@ -56,6 +56,7 @@ refuse erased-projection TYPE_ERASED f "$members" \
 refuse match-family TYPE_MATCH x "$members" 'def x : Nat := match release as d in Ballots return Nat with | bnil => 0 | bcons h t => 1'
 refuse match-arms TYPE_MATCH x "$members" 'def x : Nat := match release as d in Decision return Nat with | release => 0 | refund => 1'
 refuse nat-overflow TYPE_NAT x "$members" 'def x : Nat := natAdd 18446744073709551615 1'
+refuse nat-mul-overflow TYPE_NAT x "$members" 'def x : Nat := natMul 4294967296 4294967296'
 
 if [ "$failures" -eq 0 ]; then echo "refusal.sh: all passed"; exit 0; fi
 echo "refusal.sh: $failures failed"

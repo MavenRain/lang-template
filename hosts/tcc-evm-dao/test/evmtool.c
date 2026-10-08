@@ -62,6 +62,6 @@ int main(int argc, char **argv) {
     codes[i] = (unsigned char)code;
   }
   int listed = regime == LANG_REGIME_DEBREU || count > 0;
-  LangContract contract = { (unsigned)members, regime, listed ? codes : NULL, count, 3 };  /* the sample domain: k = 3 */
+  LangContract contract = { (unsigned)members, regime, listed ? codes : NULL, count, 3, NULL };  /* the sample domain: k = 3 */
   return lang_evm_write(&contract, part, stdout, stderr) == 0 ? 0 : 1;
 }

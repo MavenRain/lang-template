@@ -40,4 +40,13 @@ int lang_table(LangChecked *checked, const unsigned char **codes, size_t *count)
 int lang_verdicts(LangChecked *checked, const char *name, FILE *out);
 /* The normal form of NAME, then a newline. */
 int lang_eval(LangChecked *checked, const char *name, FILE *out);
+
+/* The program data hooks of the domain (domain/entries.c). The domain
+ * defines LangDomainData (evm.h). lang_domain_read returns LANG_EXIT_OK and
+ * the data of the program in *DATA (NULL: the defaults of the domain), or
+ * LANG_EXIT_REFUSED with the first error in the Diag of lang_check. The
+ * `build` verb passes *DATA to the contract (LangContract.data). The `data`
+ * verb writes only what lang_domain_print writes for *DATA. */
+int lang_domain_read(LangChecked *checked, const LangDomainData **data);
+void lang_domain_print(const LangDomainData *data, FILE *out);
 #endif

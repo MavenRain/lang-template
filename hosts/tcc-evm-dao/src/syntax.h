@@ -125,7 +125,7 @@ typedef struct {
 } MatchArm;
 
 typedef enum {
-  AST_VAR,     /* x; the checker resolves Nat, natAdd, natSub, natEq and natLt */
+  AST_VAR,     /* x; the checker resolves Nat and the Nat built-ins (check.c) */
   AST_NAT,     /* 3 */
   AST_TYPE,    /* Type 0, Type 1 */
   AST_PI,      /* (x : A) -> B, (0 x : A) -> B, A -> B */

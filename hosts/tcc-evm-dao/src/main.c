@@ -3,6 +3,7 @@
  *   langc table PROG                    REGIME MEMBERS [CODES...]
  *   langc verdicts PROG NAME            one decision code per ballot vector
  *   langc eval PROG NAME                the normal form of NAME
+ *   langc data PROG                     the program data of the domain (lang_domain_print)
  *   langc build PROG [--runtime] -o OUT the contract
  * Exit 0 ok, 1 refused, 2 usage or IO; errors go to stderr as
  * "langc: CODE: DEF: message". Each verb parses the embedded prelude and
@@ -11,8 +12,9 @@
 #include "prelude.h"
 #include <errno.h>
 #include <string.h>
+#include <sys/stat.h>
 
-typedef enum { VERB_CHECK, VERB_TABLE, VERB_VERDICTS, VERB_EVAL, VERB_BUILD } VerbKind;
+typedef enum { VERB_CHECK, VERB_TABLE, VERB_VERDICTS, VERB_EVAL, VERB_DATA, VERB_BUILD } VerbKind;
 
 typedef struct {
   const char *name;
@@ -22,11 +24,11 @@ typedef struct {
 
 static const Verb VERBS[] = {
   {"check", VERB_CHECK, 3}, {"table", VERB_TABLE, 3}, {"verdicts", VERB_VERDICTS, 4},
-  {"eval", VERB_EVAL, 4}, {"build", VERB_BUILD, 5}
+  {"eval", VERB_EVAL, 4}, {"data", VERB_DATA, 3}, {"build", VERB_BUILD, 5}
 };
 
 static int usage(void) {
-  fputs("langc: USAGE: -: langc check|table PROG, langc verdicts|eval PROG NAME,"
+  fputs("langc: USAGE: -: langc check|table|data PROG, langc verdicts|eval PROG NAME,"
         " langc build PROG [--runtime] -o OUT\n", stderr);
   return LANG_EXIT_USAGE;
 }
@@ -67,7 +69,23 @@ static int verb_table(LangChecked *checked) {
   return LANG_EXIT_OK;
 }
 
-/* build PROG [--runtime] -o OUT: OUT is the last argument. */
+/* data PROG: only what the domain hooks give (domain/entries.c). */
+static int verb_data(LangChecked *checked) {
+  const LangDomainData *data = NULL;
+  int status = lang_domain_read(checked, &data);
+  if (status != LANG_EXIT_OK)
+    return status;
+  lang_domain_print(data, stdout);
+  return LANG_EXIT_OK;
+}
+
+static int same_file(const char *input, const char *output) {
+  struct stat source, destination;
+  return stat(input, &source) == 0 && stat(output, &destination) == 0 &&
+         source.st_dev == destination.st_dev && source.st_ino == destination.st_ino;
+}
+
+/* build PROG [--runtime] -o OUT: emit completely before opening OUT. */
 static int verb_build(LangChecked *checked, Diag *diag, int argc, char **argv) {
   LangContract contract;
   int status = lang_table(checked, &contract.codes, &contract.count);
@@ -76,19 +94,48 @@ static int verb_build(LangChecked *checked, Diag *diag, int argc, char **argv) {
   contract.members = lang_members(checked);
   contract.regime = lang_regime(checked);
   contract.decisions = lang_decisions(checked);
+  contract.data = NULL;
+  status = lang_domain_read(checked, &contract.data);
+  if (status != LANG_EXIT_OK)
+    return status;
   const char *path = argv[argc - 1];
-  FILE *out = fopen(path, "w");
-  if (out == NULL) {
+  if (same_file(argv[2], path)) {
+    diag_set(diag, "IO_WRITE", span_of("-"), "%s: source and output are the same file", path);
+    return LANG_EXIT_USAGE;
+  }
+  FILE *code = tmpfile();
+  if (code == NULL) {
     diag_set(diag, "IO_WRITE", span_of("-"), "%s: %s", path, strerror(errno));
     return LANG_EXIT_USAGE;
   }
   LangPart part = argc == 6 ? LANG_PART_RUNTIME : LANG_PART_CREATION;
-  int failed = lang_evm_write(&contract, part, out, stderr);
-  int closed = fclose(out);
-  if (failed)
+  int failed = lang_evm_write(&contract, part, code, stderr);
+  if (failed) {
+    fclose(code);
     return LANG_EXIT_REFUSED;
-  if (closed != 0) {
+  }
+  if (fseek(code, 0, SEEK_SET) != 0) {
     diag_set(diag, "IO_WRITE", span_of("-"), "%s: %s", path, strerror(errno));
+    fclose(code);
+    return LANG_EXIT_USAGE;
+  }
+  FILE *out = fopen(path, "w");
+  if (out == NULL) {
+    diag_set(diag, "IO_WRITE", span_of("-"), "%s: %s", path, strerror(errno));
+    fclose(code);
+    return LANG_EXIT_USAGE;
+  }
+  unsigned char buffer[1024];
+  size_t size;
+  while ((size = fread(buffer, 1, sizeof buffer, code)) > 0)
+    if (fwrite(buffer, 1, size, out) != size)
+      break;
+  int write_failed = ferror(code) || ferror(out);
+  int error = errno;
+  fclose(code);
+  int closed = fclose(out);
+  if (write_failed || closed != 0) {
+    diag_set(diag, "IO_WRITE", span_of("-"), "%s: %s", path, strerror(closed != 0 ? errno : error));
     return LANG_EXIT_USAGE;
   }
   return LANG_EXIT_OK;
@@ -102,6 +149,7 @@ static int run_verb(LangChecked *checked, const Verb *verb, Diag *diag, int argc
   case VERB_TABLE: return verb_table(checked);
   case VERB_VERDICTS: return lang_verdicts(checked, argv[3], stdout);
   case VERB_EVAL: return lang_eval(checked, argv[3], stdout);
+  case VERB_DATA: return verb_data(checked);
   case VERB_BUILD: return verb_build(checked, diag, argc, argv);
   }
   return LANG_EXIT_USAGE;
@@ -139,7 +187,11 @@ int main(int argc, char **argv) {
   arena_init(&arena, LANG_ARENA_MAX);
   diag_init(&diag);
   int status = run(&arena, verb, &diag, argc, argv);
-  fflush(stdout);
+  int flushed = fflush(stdout);
+  if ((flushed != 0 || ferror(stdout)) && status == LANG_EXIT_OK) {
+    diag_set(&diag, "IO_WRITE", span_of("-"), "stdout: %s", strerror(errno));
+    status = LANG_EXIT_USAGE;
+  }
   diag_print(&diag, stderr);
   arena_free(&arena);
   return status;

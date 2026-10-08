@@ -423,7 +423,7 @@ static int runtime_debreu(Asm *a, const LangContract *contract, FILE *err) {
       packed[31 - at / 8] |= (unsigned char)(((code >> t) & 1u) << (at % 8));
     }
   }
-  EntryContext context = {n, k, packed};
+  EntryContext context = {n, k, packed, contract->data};
   int bad = runtime_entries(a, LANG_REGIME_DEBREU, &context, err);
   if (bad)
     return bad;
@@ -431,6 +431,8 @@ static int runtime_debreu(Asm *a, const LangContract *contract, FILE *err) {
   size_t bytes = table_bytes(n, k);
   for (size_t b = 0; b < bytes; b++)
     asm_put(a, table[b]);
+  asm_bind(a, LABEL_DATA);
+  lang_domain_data(a, &context);
   return 0;
 }
 
@@ -476,8 +478,13 @@ static int build_runtime(Asm *a, const LangContract *contract, FILE *err) {
       int bad = check_impossibility(contract, err);
       if (bad)
         return bad;
-      EntryContext context = {contract->members, 0, NULL};
-      return runtime_entries(a, LANG_REGIME_IMPOSSIBILITY, &context, err);
+      EntryContext context = {contract->members, 0, NULL, contract->data};
+      bad = runtime_entries(a, LANG_REGIME_IMPOSSIBILITY, &context, err);
+      if (bad)
+        return bad;
+      asm_bind(a, LABEL_DATA);
+      lang_domain_data(a, &context);
+      return 0;
     }
     case LANG_REGIME_DEBREU: {
       int bad = check_debreu(contract, err);
@@ -489,10 +496,12 @@ static int build_runtime(Asm *a, const LangContract *contract, FILE *err) {
   return fail(err, "EVM_USAGE", "unknown regime %d", (int)contract->regime);
 }
 
-/* Reverts on a call value, copies the runtime to memory and returns it. */
-static void creation(Asm *a, const Asm *body) {
+/* Reverts on a call value, writes the genesis storage (the domain), copies
+ * the runtime to memory and returns it. */
+static void creation(Asm *a, const Asm *body, const LangContract *contract) {
   asm_op(a, OP_CALLVALUE);
   asm_jump_if(a, LABEL_REVERT);
+  lang_domain_genesis(a, contract);
   asm_push(a, body->size);
   asm_op(a, OP_DUP1);
   asm_push_label(a, LABEL_RUNTIME);
@@ -545,7 +554,7 @@ int lang_evm_write(const LangContract *contract, LangPart part, FILE *out, FILE 
     case LANG_PART_RUNTIME:
       return write_hex(&body_asm, out, err);
     case LANG_PART_CREATION:
-      creation(&creation_asm, &body_asm);
+      creation(&creation_asm, &body_asm, contract);
       bad = finish(&creation_asm, err);
       return bad ? bad : write_hex(&creation_asm, out, err);
   }

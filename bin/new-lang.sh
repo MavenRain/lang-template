@@ -3,12 +3,11 @@
 #
 # Usage: bin/new-lang.sh NAME HOST [DEST]
 #
-# NAME is the language name (^[a-z][a-z0-9-]*$). HOST is mech, assay,
-# tcc-json, tcc-evm-contract, tcc-wasm or tcc-evm. DEST
-# is the new directory; the default is ../NAME beside the template root. The
-# script copies the template files and the host kit hosts/HOST into DEST,
-# replaces {{LANG}} with NAME and {{HOST}} with HOST, and runs git init. It
-# never commits.
+# NAME is the language name (^[a-z][a-z0-9-]*$). HOST is one entry of the
+# hosts array below. DEST is the new directory; the default is ../NAME beside
+# the template root. The script copies the template files and the host kit
+# hosts/HOST into DEST, replaces {{LANG}} with NAME and {{HOST}} with HOST,
+# and runs git init. It never commits.
 #
 # Paths in DEST:
 #   SPEC.template.md             -> SPEC.md
@@ -27,10 +26,32 @@
 # The script refuses overlapping template and host paths in DEST.
 set -euo pipefail
 
+# The host kits. This is the only list of hosts: the usage text and the
+# refusal print it. Each entry is the kit hosts/HOST and needs an arm in the
+# gate case below.
+hosts=(mech assay tcc-json tcc-evm-contract tcc-wasm tcc-evm tcc-evm-dao)
+
+# Print the hosts as "a, b or c".
+host_list() {
+  local IFS=,
+  local last=$((${#hosts[@]} - 1))
+  local head="${hosts[*]:0:last}"
+  printf '%s or %s' "${head//,/, }" "${hosts[last]}"
+}
+
+# Succeed only when $1 is equal to one entry of hosts.
+known_host() {
+  local entry
+  for entry in "${hosts[@]}"; do
+    [[ $1 == "$entry" ]] && return 0
+  done
+  return 1
+}
+
 usage() {
   printf 'usage: %s NAME HOST [DEST]\n' "${0##*/}" >&2
   printf '  NAME  language name, matching ^[a-z][a-z0-9-]*$\n' >&2
-  printf '  HOST  mech, assay, tcc-json, tcc-evm-contract, tcc-wasm or tcc-evm\n' >&2
+  printf '  HOST  %s\n' "$(host_list)" >&2
   printf '  DEST  new directory (default: ../NAME beside the template root)\n' >&2
 }
 
@@ -47,9 +68,14 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 dest=${3:-$root/../$name}
 
 [[ $name =~ ^[a-z][a-z0-9-]*$ ]] || refuse "bad NAME '$name': use ^[a-z][a-z0-9-]*\$"
+known_host "$host" || refuse "unknown HOST '$host': use $(host_list)"
+# The gate command of each host. The script refuses a host without an arm
+# here before it writes DEST.
 case $host in
-  mech | assay | tcc-json | tcc-evm-contract | tcc-wasm | tcc-evm) ;;
-  *) refuse "unknown HOST '$host': use mech, assay, tcc-json, tcc-evm-contract, tcc-wasm or tcc-evm" ;;
+  mech) gate="make check test" ;;
+  assay) gate="bash gate.sh" ;;
+  tcc-json | tcc-evm-contract | tcc-wasm | tcc-evm | tcc-evm-dao) gate="make check" ;;
+  *) refuse "HOST '$host' has no gate command: add it to the gate case in bin/new-lang.sh" ;;
 esac
 [[ $host != tcc-json || $name != instances ]] || refuse "NAME 'instances' is reserved by the tcc-json document format"
 kit=$root/hosts/$host
@@ -185,12 +211,6 @@ find "$dest" -type f -print0 | NAME="$name" HOST="$host" xargs -0 perl -e '
 '
 
 git -C "$dest" init -q -b main
-
-case $host in
-  mech) gate="make check test" ;;
-  assay) gate="bash gate.sh" ;;
-  tcc-json | tcc-evm-contract | tcc-wasm | tcc-evm) gate="make check" ;;
-esac
 
 cat <<EOF
 Made $dest (host $host). Nothing is staged or committed.

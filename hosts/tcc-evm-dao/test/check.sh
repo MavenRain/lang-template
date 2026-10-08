@@ -54,6 +54,25 @@ expect "verdicts arrow-impossibility first" 0 "111111111222222222333333333" verd
 expect "eval payeeAfterSettle" 0 "reflNat 5" eval "$programs/arrow-debreu.lang" payeeAfterSettle
 expect "eval firstX" 0 "reflDec release" eval "$programs/arrow-impossibility.lang" firstX
 expect "eval members" 0 "3" eval "$programs/arrow-impossibility.lang" members
+# The sample domain reads no program data, so `data` writes nothing.
+expect "data arrow-debreu" 0 "" data "$programs/arrow-debreu.lang"
+expect "data arrow-impossibility" 0 "" data "$programs/arrow-impossibility.lang"
+
+# natMul, natDiv and natMod reduce on literals. As the EVM DIV and MOD, a
+# divisor of 0 gives 0. The natMul overflow is in test/refusal.sh.
+cat > "$out/nat.lang" <<'EOF'
+def members : Nat := 1
+def mulSix : Nat := natMul 6 7
+def divSeven : Nat := natDiv 7 2
+def modSeven : Nat := natMod 7 2
+def divZero : Nat := natDiv 7 0
+def modZero : Nat := natMod 7 0
+EOF
+expect "eval natMul 6 7" 0 "42" eval "$out/nat.lang" mulSix
+expect "eval natDiv 7 2" 0 "3" eval "$out/nat.lang" divSeven
+expect "eval natMod 7 2" 0 "1" eval "$out/nat.lang" modSeven
+expect "eval natDiv 7 0 is 0" 0 "0" eval "$out/nat.lang" divZero
+expect "eval natMod 7 0 is 0" 0 "0" eval "$out/nat.lang" modZero
 
 # Erased Sigma fields may be constructed from erased variables and used
 # in types, while the second field remains available at run time.
