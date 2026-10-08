@@ -3,7 +3,8 @@
 #
 # Usage: bin/new-lang.sh NAME HOST [DEST]
 #
-# NAME is the language name (^[a-z][a-z0-9-]*$). HOST is mech, assay, tcc-json or tcc-evm-contract. DEST
+# NAME is the language name (^[a-z][a-z0-9-]*$). HOST is mech, assay,
+# tcc-json, tcc-evm-contract, tcc-wasm or tcc-evm. DEST
 # is the new directory; the default is ../NAME beside the template root. The
 # script copies the template files and the host kit hosts/HOST into DEST,
 # replaces {{LANG}} with NAME and {{HOST}} with HOST, and runs git init. It
@@ -29,7 +30,7 @@ set -euo pipefail
 usage() {
   printf 'usage: %s NAME HOST [DEST]\n' "${0##*/}" >&2
   printf '  NAME  language name, matching ^[a-z][a-z0-9-]*$\n' >&2
-  printf '  HOST  mech, assay, tcc-json or tcc-evm-contract\n' >&2
+  printf '  HOST  mech, assay, tcc-json, tcc-evm-contract, tcc-wasm or tcc-evm\n' >&2
   printf '  DEST  new directory (default: ../NAME beside the template root)\n' >&2
 }
 
@@ -47,8 +48,8 @@ dest=${3:-$root/../$name}
 
 [[ $name =~ ^[a-z][a-z0-9-]*$ ]] || refuse "bad NAME '$name': use ^[a-z][a-z0-9-]*\$"
 case $host in
-  mech | assay | tcc-json | tcc-evm-contract) ;;
-  *) refuse "unknown HOST '$host': use mech, assay, tcc-json or tcc-evm-contract" ;;
+  mech | assay | tcc-json | tcc-evm-contract | tcc-wasm | tcc-evm) ;;
+  *) refuse "unknown HOST '$host': use mech, assay, tcc-json, tcc-evm-contract, tcc-wasm or tcc-evm" ;;
 esac
 [[ $host != tcc-json || $name != instances ]] || refuse "NAME 'instances' is reserved by the tcc-json document format"
 kit=$root/hosts/$host
@@ -188,7 +189,7 @@ git -C "$dest" init -q -b main
 case $host in
   mech) gate="make check test" ;;
   assay) gate="bash gate.sh" ;;
-  tcc-json | tcc-evm-contract) gate="make check" ;;
+  tcc-json | tcc-evm-contract | tcc-wasm | tcc-evm) gate="make check" ;;
 esac
 
 cat <<EOF

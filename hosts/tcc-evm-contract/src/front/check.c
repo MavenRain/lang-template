@@ -1454,10 +1454,10 @@ static int check_def(Checker *c, const Decl *d) {
 }
 
 /* First order (slice K3a): Nat, Flag, U256, Addr, and Option, Prod and List
-   of first-order types. */
-static int first_order(const Core *t) {
+   of first-order types, after normalization. */
+static int first_order(const Value *t) {
   uint32_t i;
-  if (t == NULL || t->kind != CORE_OP)
+  if (t == NULL || t->kind != VAL_OP)
     return 0;
   if (t->op == OP_NAT || t->op == OP_FLAG || t->op == OP_U256 || t->op == OP_ADDR)
     return 1;
@@ -1486,7 +1486,9 @@ static int check_state(Checker *c, const Decl *d) {
     return 0;
   ci = &m->ctors[m->families[m->family_count - 1u].first_ctor];
   for (j = 0; j < ci->field_count; j++) {
-    const Core *t = ci->fields[j].type;
+    const Value *t = here(c, ci->fields[j].type);
+    if (t == NULL)
+      return 0;
     if (!first_order(t))
       return FAIL(c, "REFUSE_STATE", "the state field %s must have a first-order type: Nat, Flag, U256, Addr, or Option, Prod or List of them", ci->fields[j].name);
     if (ci->fields[j].history && t->op != OP_NAT && t->op != OP_U256)

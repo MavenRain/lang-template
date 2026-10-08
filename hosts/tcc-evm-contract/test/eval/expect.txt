@@ -39,3 +39,7 @@ words divTrap 0 => trap
 words divTrap 2 => 1
 contract init => makeState 0x00000000000000000000000000000000000000aa 0u 0u 0
 contract checked => makeState 0x00000000000000000000000000000000000000aa 0u 7u 0
+state-aliases savedHeld => 9u
+state-aliases savedCounts => pair (some 3) (cons 4 nil)
+state-aliases savedEarned => 11u
+state-aliases savedCursor => 7

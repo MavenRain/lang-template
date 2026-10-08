@@ -1,0 +1,14 @@
+-- State field restrictions apply to normalized types, including nested aliases.
+def BalanceWord : Type 0 := U256
+def ClockCount : Type 0 := Nat
+def Bundle : (A : Type 0) -> Type 0 := fun A => Prod (Option A) (List A)
+def Counts : Type 0 := Bundle ClockCount
+
+state State := makeState (aliasedHeld : BalanceWord) (aliasedCounts : Counts)
+  history (aliasedEarned : BalanceWord) history (aliasedCursor : ClockCount)
+
+def initial : State := makeState 9u (pair (some 3) (cons 4 nil)) 11u 7
+def savedHeld : U256 := aliasedHeld initial
+def savedCounts : Prod (Option Nat) (List Nat) := aliasedCounts initial
+def savedEarned : U256 := aliasedEarned initial
+def savedCursor : Nat := aliasedCursor initial

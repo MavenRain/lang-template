@@ -31,6 +31,8 @@ Choose the host by the target.
 | assay | An EVM contract and a kernel file | `assay` | [`hosts/assay/README.md`](hosts/assay/README.md) |
 | tcc-json | One JSON document: the final state of each instance | `build/langc` (TinyCC) | [`hosts/tcc-json/README.md`](hosts/tcc-json/README.md) |
 | tcc-evm-contract | A deployable EVM contract (slice K4; the ABI selectors now) | `build/langc` (TinyCC) | [`hosts/tcc-evm-contract/README.md`](hosts/tcc-evm-contract/README.md) |
+| tcc-wasm | A Wasm module with one `i64` export for each entry | `build/langc` (TinyCC) | [`hosts/tcc-wasm/README.md`](hosts/tcc-wasm/README.md) |
+| tcc-evm | EVM bytecode with one ABI `uint256` function for each entry | `build/langc` (TinyCC) | [`hosts/tcc-evm/README.md`](hosts/tcc-evm/README.md) |
 
 The realization matrix in `formers/FORMERS.md` section 5 gives the status of
 each former on each host. Read it before you choose. For example, assay
@@ -45,7 +47,7 @@ bin/new-lang.sh NAME HOST [DEST]
 
 - `NAME` is the language name. It must match `^[a-z][a-z0-9-]*$`.
   The `tcc-json` host reserves `instances` for its JSON document key.
-- `HOST` is `mech`, `assay`, `tcc-json` or `tcc-evm-contract`.
+- `HOST` is `mech`, `assay`, `tcc-json`, `tcc-evm-contract`, `tcc-wasm` or `tcc-evm`.
 - `DEST` is the new directory. The default is `../NAME` beside the template
   root. The script refuses a `DEST` that exists.
 
@@ -86,14 +88,17 @@ replaces `{{LANG}}` with `NAME` and `{{HOST}}` with `HOST`. It runs
 | `docs/STATUS.template.md`, `docs/VALIDATION.template.md` | The status and validation forms |
 | `bin/new-lang.sh` | Makes a new language |
 | `bin/doc-check.pl` | The check behind `make doc-check` |
-| `hosts/mech/`, `hosts/assay/`, `hosts/tcc-json/`, `hosts/tcc-evm-contract/` | The host kits |
+| `hosts/mech/`, `hosts/assay/`, `hosts/tcc-json/`, `hosts/tcc-evm-contract/`, `hosts/tcc-wasm/`, `hosts/tcc-evm/` | The host kits |
 
 ## Gates
 
 - `make check` runs the documentation check, tool regression tests, and the
-  gate of each host kit that is present. The probe guard tests need macOS,
-  as does `probe/guard.py` itself.
-- `make test` runs the tool regression tests with Python 3.
+  gate of each host kit that is present. It also checks that
+  `hosts/tcc-wasm` and `hosts/tcc-evm` have the same shared files. The probe
+  guard tests need macOS, as does `probe/guard.py` itself.
+- `make test` runs the tool regression tests with Python 3. Two of these
+  tests make a language from `hosts/tcc-wasm` and from `hosts/tcc-evm` and
+  run its gate, so they need the tools that the kit READMEs list.
 - `make doc-check` fails on an em-dash or an en-dash in a Markdown file, and
   on a placeholder other than `{{LANG}}` and `{{HOST}}`.
 

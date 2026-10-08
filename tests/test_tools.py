@@ -150,6 +150,27 @@ class GeneratorTests(unittest.TestCase):
                          'static const char LANG_NAME[] = "example-lang";\n')
         self.assertIn(": make check\n", result.stdout)
 
+    def test_tcc_wasm_and_tcc_evm_hosts(self):
+        for host, target in (("tcc-wasm", "src/wasm.c"), ("tcc-evm", "src/evm.c")):
+            with self.subTest(host=host):
+                kit = self.template / "hosts" / host
+                (kit / "src").mkdir(parents=True)
+                (kit / "docs").mkdir()
+                (kit / "README.md").write_text("Host guide\n")
+                (kit / "FORMERS.md").write_text("Host formers\n")
+                (kit / "docs/CAPABILITY.md").write_text("Host probe\n")
+                (kit / target).write_text('static const char LANG_NAME[] = "{{LANG}}";\n')
+                dest = self.base / host
+                result = run("bash", str(self.template / "bin/new-lang.sh"),
+                             "example-lang", host, str(dest))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual((dest / f"formers/{host}.md").read_text(), "Host formers\n")
+                self.assertEqual((dest / "docs/host/README.md").read_text(), "Host guide\n")
+                self.assertEqual((dest / "docs/host/CAPABILITY.md").read_text(), "Host probe\n")
+                self.assertEqual((dest / target).read_text(),
+                                 'static const char LANG_NAME[] = "example-lang";\n')
+                self.assertIn(": make check\n", result.stdout)
+
     def test_unknown_host_is_rejected(self):
         result = run("bash", str(self.template / "bin/new-lang.sh"),
                      "example-lang", "nohost", str(self.dest))
@@ -163,6 +184,30 @@ class GeneratorTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("reserved by the tcc-json document format", result.stderr)
         self.assertFalse(self.dest.exists())
+
+
+@unittest.skipUnless(sys.platform == "darwin", "guard uses macOS libproc")
+class TccKitTests(unittest.TestCase):
+    """Make a language from each real TinyCC kit and run its own gate."""
+
+    def generate_and_check(self, host, target):
+        with tempfile.TemporaryDirectory() as temp:
+            dest = Path(temp) / "example-lang"
+            result = run("bash", str(ROOT / "bin/new-lang.sh"), "example-lang", host, str(dest))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for path in (f"formers/{host}.md", "docs/host/README.md", "docs/host/CAPABILITY.md",
+                         "domain/domain.lang", target, "Makefile", "PIN"):
+                self.assertTrue((dest / path).is_file(), path)
+            self.assertFalse((dest / "build").exists())
+            gate = subprocess.run(("make", "-C", str(dest), "check"), text=True,
+                                  capture_output=True, timeout=900)
+            self.assertEqual(gate.returncode, 0, gate.stdout[-4000:] + gate.stderr[-4000:])
+
+    def test_tcc_wasm_language_passes_its_gate(self):
+        self.generate_and_check("tcc-wasm", "src/wasm.c")
+
+    def test_tcc_evm_language_passes_its_gate(self):
+        self.generate_and_check("tcc-evm", "src/evm.c")
 
 
 @unittest.skipUnless(sys.platform == "darwin", "guard uses macOS libproc")

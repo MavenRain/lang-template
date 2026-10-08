@@ -1,0 +1,4 @@
+-- REFUSE_STATE: normalization must also check types inside containers.
+def Callback : Type 0 := Nat -> Nat
+def Callbacks : Type 0 := List (Option Callback)
+state State := makeState (aliasedCallbacks : Callbacks)

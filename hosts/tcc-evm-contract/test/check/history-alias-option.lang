@@ -1,0 +1,3 @@
+-- REFUSE_STATE: a first-order alias is not necessarily a scalar history type.
+def MaybeCount : Type 0 := Option Nat
+state State := makeState history (aliasedHistory : MaybeCount)

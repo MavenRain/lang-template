@@ -76,6 +76,7 @@ state State := makeState (owner : Addr) (held : U256) history (earned : U256) (c
 - `state` is a keyword. A program can declare one state only.
 - The state type must have the name `State`, no parameters and one constructor.
 - Each field type must be first order: `Nat`, `Flag`, `U256`, `Addr`, or `Option`, `Prod` or `List` of first-order types. A field cannot have the type `State`, a function type or a `Type`.
+- Field types are checked after normalization, so type aliases are allowed, including inside containers and in history fields.
 - The word `history` marks each field of the next `(...)` group as a history field. A history field must have the type `Nat` or `U256`.
 - `history` is not a reserved word. It has this function only in the field list of a state.
 - Each field name is a projection, as in a family. For example, `held s` is the `held` field of the state `s`.

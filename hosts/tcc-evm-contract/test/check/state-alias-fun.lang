@@ -1,0 +1,3 @@
+-- REFUSE_STATE: a function alias is not a first-order state field type.
+def Callback : Type 0 := Nat -> Nat
+state State := makeState (aliasedCallback : Callback)
