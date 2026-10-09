@@ -105,6 +105,9 @@ kit-owned files, including this README and `docs/CAPABILITY.md`, which
 are maintained separately. The refresh adds amendment and dispute
 examples, guarded EVM entries and their chain tests.
 
+M7 refresh (2026-10-09): the 55 mapped files match anchor-lang at
+`30d230f`, with the same renames below.
+
 SPEC cites (M7, 2026-10-09): each "SPEC section N" in this kit is a
 section of the anchor-lang `SPEC.md` at commit `211dc59`. Choice a keeps
 that file out of the kit.

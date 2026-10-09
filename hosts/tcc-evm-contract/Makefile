@@ -74,6 +74,7 @@ check: build/langc build/asmtool build/fronttool build/runtool build/slottool bu
 	sh test/asm.sh
 	sh test/build.sh
 	sh test/dispatch.sh
+	sh test/evm.sh
 	sh test/review.sh
 	build/fronttool
 	build/runtool

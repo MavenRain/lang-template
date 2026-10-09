@@ -232,6 +232,7 @@ Decode (slice K4b):
 
 Entry body (slice K4b):
 
+- `now` is the TIMESTAMP of the block and `caller` is CALLER, the sender of the call.
 - `none` reverts with empty data.
 - A trap reverts with the 4 bytes of the `Trap()` selector, `0xae96083a`.
 - `some (pair STATE OUT)` writes each changed word field and each Map write with SSTORE. Then the block stops (STOP).
@@ -259,11 +260,13 @@ The other refusals of `langc build` (exit 1, no output):
 
 `test/dispatch.sh` builds `examples/residuals.lang` and does 20 calls with geth `evm run`: empty call data, a short selector, an unknown selector, a call value (and a control call with no value), `none`, a trap, a caller that is not the owner, short call data, dirty Nat bits, Nat 2^64 - 1, dirty Addr bits (bit 160), a dirty Flag word (the value 2), a control call with an Addr and a Flag argument, and the storage after three entries. The selectors and the Map slots come from the SHA3 op of `evm`, not from `langc`.
 
+`test/evm.sh` is the chain test (the helpers are in `test/evmchain.sh`). It deploys `examples/contract.lang`, `examples/map.lang` and `examples/residuals.lang` with `evm run --create`. Then it does one `evm run --prestate --dump` step for each call of `test/run/basic.script`, `test/run/map.script` and `test/run/residuals.script` (21 steps). The block TIMESTAMP of a step is `NOW` (the prestate timestamp) and the sender is `CALLER`. After each step, the storage must equal the state that `langc run` prints for the calls up to that step. The result must agree with the result of the call: ok, revert (`none`) or trap. A view call reverts, because slice K4b has no views in the dispatcher. The selectors come from the SHA3 op of `evm`. The argument types come from the `def` line of the entry.
+
 `build/buildtool` checks the 37-byte runtime of a contract with no entry, the EIP-170 runtime limit in the two output modes, the EVM_SELECTOR refusal (before any output) and IO_WRITE with exit 2 for a closed stdout pipe.
 
 ## Commands
 
-- `make check`: the tcc build with `-Wall -Werror`, the clang syntax pass, `test/gate.sh`, `test/run.sh`, `test/asm.sh`, `test/build.sh` and `test/dispatch.sh`. `test/asm.sh`, `test/build.sh` and `test/dispatch.sh` need geth `evm` on PATH.
+- `make check`: the tcc build with `-Wall -Werror`, the clang syntax pass, `test/gate.sh`, `test/run.sh`, `test/asm.sh`, `test/build.sh`, `test/dispatch.sh` and `test/evm.sh`. `test/asm.sh`, `test/build.sh`, `test/dispatch.sh` and `test/evm.sh` need geth `evm` on PATH.
 - `build/langc check FILE` and `build/langc eval FILE`: as in tcc-wasm.
 - `build/langc run PROG SCRIPT`: does the calls in `SCRIPT` on the program `PROG`. Refer to `## Contracts (slice K3)`. `test/run.sh` runs each `test/run/NAME.script` on `examples/contract.lang` and compares the output with `test/run/NAME.out`. It also has 8 refusal rows and a usage row. `build/runtool` checks fresh fuel for initialization and call classification.
 - `build/langc build FILE [-o OUT] [--runtime]` writes the creation code (with `--runtime`, the runtime code: the dispatcher and the entry blocks) as one line of lowercase hex. Refer to `## EVM output (slice K4)`.

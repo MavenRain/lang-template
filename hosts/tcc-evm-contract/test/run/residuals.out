@@ -1,0 +1,10 @@
+1 own ok
+2 own revert
+3 crash trap
+4 refuse revert
+5 earn ok
+6 file ok
+7 mark ok
+8 own ok
+9 mark revert
+state makeState 0x00000000000000000000000000000000000000bb 0u 5u 0 (mapOf [(3, 9u)])
