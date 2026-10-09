@@ -75,7 +75,13 @@ typedef enum {
   OP_U256_MIN,
   OP_TO_U256,
   OP_ADDR_EQ,
-  OP_PROJ
+  OP_PROJ,
+  /* Slice K4a0: Map K V, the map value (k0 v0 k1 v1 ... with the keys in
+     order and no zero value), mapGet V m k and mapSet V m k v. */
+  OP_KMAP,
+  OP_KMAP_OF,
+  OP_KMAP_GET,
+  OP_KMAP_SET
 } Op;
 
 /* The instance of pure, map, bind and filter (formers F5 and F8). */

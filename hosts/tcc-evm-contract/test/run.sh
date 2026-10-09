@@ -7,11 +7,14 @@ runs=0
 tmp=${TMPDIR:-/tmp}/langc-run.$$
 mkdir -p "$tmp"
 
-# For each test/run/NAME.script, `langc run examples/contract.lang` must exit 0
-# and print test/run/NAME.out byte for byte.
+# For each test/run/NAME.script, `langc run examples/NAME.lang` (examples/contract.lang
+# when there is no examples/NAME.lang) must exit 0 and print test/run/NAME.out
+# byte for byte.
 for script in test/run/*.script; do
+  prog=examples/$(basename "${script%.script}").lang
+  [ -f "$prog" ] || prog=examples/contract.lang
   status=0
-  build/langc run examples/contract.lang "$script" >"$tmp/out" 2>"$tmp/err" || status=$?
+  build/langc run "$prog" "$script" >"$tmp/out" 2>"$tmp/err" || status=$?
   runs=$((runs + 1))
   if [ "$status" -ne 0 ] || ! cmp -s "${script%.script}.out" "$tmp/out"; then
     echo "FAIL run $script: exit $status: $(head -n 1 "$tmp/err")"
@@ -41,6 +44,8 @@ run_refused 2 EVAL_ARGS examples/contract.lang "1 $caller deposit 5u 6u"
 run_refused 1 EVAL_ENTRY examples/contract.lang "1 $caller checkpoint init 7u"
 run_refused 1 EVAL_ENTRY examples/contract.lang "1 $caller nope"
 run_refused 1 RUN_INIT examples/entries.lang "1 $caller addPrice 1 2"
+run_refused 1 EVAL_ENTRY examples/map.lang "1 $caller putAll 3"
+run_refused 1 EVAL_ENTRY examples/map.lang "1 $caller allBooks"
 
 # A NUL cannot hide extra words. Calls before the bad line keep their output.
 printf '1 %s balance\n2 %s deposit 5u\000 6u\n' "$caller" "$caller" >"$tmp/bad.script"

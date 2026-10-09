@@ -18,6 +18,7 @@ The TinyCC host kit of retainer-lang. It compiles the contract language to EVM b
 | K3a | Contract types: State, Env, Out, entries and views | Done |
 | K3b | `langc run` and call scripts | Done |
 | K3c | History rule: REFUSE_HISTORY_WRITE | Done |
+| K4a0 | Map former (front end) | Done |
 | K4 to K5 | See the retainer-lang brief | Planned |
 
 
@@ -151,6 +152,20 @@ The exit codes of `langc run`:
   - `EVAL_ENTRY`: `NAME` is not an entry or a view.
   - `EVAL_FUEL`, `EVAL_DEPTH` and `EVAL_PRINT` stop the run, as in `langc eval`.
 - 2: a usage error, an `IO` error for the script, or `EVAL_ARGS` (a bad argument or an incorrect number of arguments), as in `langc eval`.
+
+## Maps (slice K4a0)
+
+`Map K V` is a finite map. K4a0 adds it to the front end only (`langc check`, `langc eval` and `langc run`). There is no EVM code for a Map yet.
+
+- The key type K must be Nat, U256 or Addr. The value type V must be Nat, Flag, U256 or Addr. Other types give REFUSE_MAP.
+- `mapEmpty` is the empty map. `mapGet m k` gives the value at the key k. `mapSet m k v` gives the map with the value v at the key k.
+- A key with no value gives the zero value of V: 0, flagNo or the zero word of the sort (EVM storage reads 0 from a slot that is not set). `mapSet m k` with the zero value removes the key. There is no delete, fold, size or key list, because an EVM mapping cannot be iterated.
+- The value is canonical: the keys are in order and no value is zero. Thus two maps with the same entries are equal by `refl`, in any order of the sets.
+- `mapGet` infers its map argument, so `mapGet mapEmpty k` gives TYPE_INFER. A map argument that is not a Map gives TYPE_MISMATCH.
+- Print form: `mapOf [(1, 2), (3, 4)]`, and `mapOf []` for the empty map. As an argument, the form is in parentheses.
+- A Map can be a state field at the top level only. A Map in Option, Prod or List, and a history Map, give REFUSE_STATE.
+- A Map has no ABI type. A definition with a Map argument or a Map result is a helper, not an entry or a view, so `langc run` gives EVAL_ENTRY for a call to it.
+- examples/map.lang has the laws as `refl` definitions and a state with a Map field. test/run/map.script calls it. The run gate runs test/run/NAME.script on examples/NAME.lang when that file exists, else on examples/contract.lang.
 
 ## Commands
 

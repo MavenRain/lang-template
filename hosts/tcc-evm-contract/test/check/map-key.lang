@@ -1,0 +1,2 @@
+-- The key type of a Map must be Nat, U256 or Addr.
+def bad : Map (List Nat) Nat := mapEmpty

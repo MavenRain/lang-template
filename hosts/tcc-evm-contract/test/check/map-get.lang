@@ -1,0 +1,2 @@
+-- The map argument of mapGet must be a Map.
+def bad : Nat := mapGet 3 4

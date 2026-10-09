@@ -1,0 +1,2 @@
+-- A Map state field is allowed at the top level only.
+state State := makeState (books : Option (Map Nat Nat))

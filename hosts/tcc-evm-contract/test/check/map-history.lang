@@ -1,0 +1,2 @@
+-- A history field is an append-only List, so a history Map is refused.
+state State := makeState history (books : Map Nat Nat)

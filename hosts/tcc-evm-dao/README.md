@@ -123,8 +123,12 @@ struct. The core passes only a pointer (`LangContract.data` and
 The sample domain reads no program data. Its `lang_domain_read` gives
 NULL, and the other three hooks write nothing. `src/check.h` gives the
 reader only the public checker calls. A reader that must evaluate program
-definitions goes in `src/check.c`. interest-lang at commit a2ce1b8 (`lang_data` in its `src/check.c`) is an
-example.
+definitions goes in `src/check.c`. interest-lang at commit a2ce1b8
+(`lang_data` in its `src/check.c`) is an example. interest-lang at commit
+ccd5b95 is a full example of the four hooks. Its `domain/data.h` defines
+`LangDomainData`. Its `domain/entries.c` gives `lang_domain_read`,
+`lang_domain_print`, `lang_domain_genesis` and `lang_domain_data`. Its
+`lang_domain_read` calls the reader `lang_data` in `src/check.c`.
 
 The checker reduces the Nat built-ins `natAdd`, `natSub`, `natMul`,
 `natDiv`, `natMod`, `natEq` and `natLt` on literals. `natAdd` and `natMul`

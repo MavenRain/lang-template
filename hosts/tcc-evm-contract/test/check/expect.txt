@@ -42,3 +42,8 @@ history-closed.lang REFUSE_HISTORY_WRITE
 history-hidden.lang REFUSE_HISTORY_WRITE
 history-existential-init.lang REFUSE_HISTORY_WRITE
 history-existential-closed.lang REFUSE_HISTORY_WRITE
+map-key.lang REFUSE_MAP
+map-value.lang REFUSE_MAP
+map-history.lang REFUSE_STATE
+map-nested.lang REFUSE_STATE
+map-get.lang TYPE_MISMATCH

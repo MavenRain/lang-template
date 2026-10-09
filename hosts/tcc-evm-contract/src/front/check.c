@@ -70,7 +70,10 @@ typedef enum {
   RULE_U256_2,
   RULE_ADDR2,
   RULE_TO_U256,
-  RULE_FLAG_IF
+  RULE_FLAG_IF,
+  RULE_KMAP,
+  RULE_KMAP_GET,
+  RULE_KMAP_SET
 } Rule;
 
 typedef struct {
@@ -135,7 +138,11 @@ static const Builtin BUILTINS[] = {
   {"u256Min", 2, RULE_U256_2, OP_U256_MIN, OP_U256, 0},
   {"toU256", 1, RULE_TO_U256, OP_TO_U256, OP_U256, 0},
   {"addrEq", 2, RULE_ADDR2, OP_ADDR_EQ, OP_FLAG, 0},
-  {"flagIf", 3, RULE_FLAG_IF, OP_FLAG_IF, OP_FLAG, 0}
+  {"flagIf", 3, RULE_FLAG_IF, OP_FLAG_IF, OP_FLAG, 0},
+  {"Map", 2, RULE_KMAP, OP_KMAP, OP_NAT, 0},
+  {"mapEmpty", 0, RULE_EMPTY, OP_KMAP_OF, OP_KMAP, 0},
+  {"mapGet", 2, RULE_KMAP_GET, OP_KMAP_GET, OP_KMAP, 0},
+  {"mapSet", 3, RULE_KMAP_SET, OP_KMAP_SET, OP_KMAP, 0}
 };
 
 #define BUILTIN_COUNT ((uint32_t)(sizeof BUILTINS / sizeof BUILTINS[0]))
@@ -530,7 +537,7 @@ static const Core *rule_inj(Call *k) {
 
 static const Core *rule_empty(Call *k) {
   if (!val_is(k->hint, k->b->result))
-    return need_type(k, k->b->result == OP_OPTION ? "Option A" : "List A");
+    return need_type(k, k->b->result == OP_OPTION ? "Option A" : k->b->result == OP_KMAP ? "Map K V" : "List A");
   k->type = k->hint;
   return op3(k->c, k->b->op, 0, 0, NULL, NULL, NULL);
 }
@@ -889,6 +896,44 @@ static const Core *rule_flag_if(Call *k) {
   return op3(c, OP_FLAG_IF, 0, 3, b, yes, no);
 }
 
+static int kmap_word(const Value *t, int flag_ok) {
+  return val_is(t, OP_NAT) || val_is(t, OP_U256) || val_is(t, OP_ADDR) || (flag_ok && val_is(t, OP_FLAG));
+}
+
+/* Map K V (slice K4a0): K is Nat, U256 or Addr. V is Nat, Flag, U256 or Addr. */
+static const Core *rule_kmap(Call *k) {
+  const Core *t = rule_type2(k);
+  const Value *v = here(k->c, t);
+  if (v == NULL)
+    return NULL;
+  if (!kmap_word(v->args[0], 0))
+    return nul(FAIL(k->c, "REFUSE_MAP", "the key type of a Map must be Nat, U256 or Addr, found %s", show(k->c, v->args[0])));
+  if (!kmap_word(v->args[1], 1))
+    return nul(FAIL(k->c, "REFUSE_MAP", "the value type of a Map must be Nat, Flag, U256 or Addr, found %s", show(k->c, v->args[1])));
+  return t;
+}
+
+/* mapGet m k and mapSet m k v (slice K4a0). The core puts V first, so the
+   evaluator can make the zero value of V. */
+static const Core *kmap_access(Call *k, int set) {
+  Checker *c = k->c;
+  const Value *t = set && val_is(k->hint, OP_KMAP) ? k->hint : NULL;
+  const Core *map = t != NULL ? check(c, k->args[0], t) : infer(c, k->args[0], &t);
+  const Core *key;
+  const Core *args[4];
+  if (map == NULL)
+    return NULL;
+  if (!val_is(t, OP_KMAP))
+    return nul(FAIL(c, "TYPE_MISMATCH", "%s needs a Map K V, found %s", k->b->name, show(c, t)));
+  key = check(c, k->args[1], t->args[0]);
+  args[0] = op3(c, t->args[1]->op, 0, 0, NULL, NULL, NULL);
+  args[1] = map;
+  args[2] = key;
+  args[3] = set && key != NULL ? check(c, k->args[2], t->args[1]) : NULL;
+  k->type = set ? t : t->args[1];
+  return core_op(c, k->b->op, 0, 0, args, set ? 4u : 3u);
+}
+
 static const Core *rule(Call *k) {
   switch (k->b->rule) {
   case RULE_TYPE0:
@@ -954,6 +999,12 @@ static const Core *rule(Call *k) {
     return rule_prim(k, OP_ADDR);
   case RULE_FLAG_IF:
     return rule_flag_if(k);
+  case RULE_KMAP:
+    return rule_kmap(k);
+  case RULE_KMAP_GET:
+    return kmap_access(k, 0);
+  case RULE_KMAP_SET:
+    return kmap_access(k, 1);
   }
   return NULL;
 }
@@ -1603,8 +1654,8 @@ static int check_state(Checker *c, const Decl *d) {
     const Value *t = here(c, ci->fields[j].type);
     if (t == NULL)
       return 0;
-    if (!first_order(t))
-      return FAIL(c, "REFUSE_STATE", "the state field %s must have a first-order type: Nat, Flag, U256, Addr, or Option, Prod or List of them", ci->fields[j].name);
+    if (!first_order(t) && !val_is(t, OP_KMAP))
+      return FAIL(c, "REFUSE_STATE", "the state field %s must have a first-order type: Nat, Flag, U256, Addr, Option, Prod or List of them, or a Map K V", ci->fields[j].name);
     if (ci->fields[j].history && t->op != OP_NAT && t->op != OP_U256)
       return FAIL(c, "REFUSE_STATE", "the history field %s must have the type Nat or U256", ci->fields[j].name);
   }

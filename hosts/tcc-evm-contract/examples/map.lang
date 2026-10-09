@@ -1,0 +1,36 @@
+-- Maps (kit slice K4a0): the laws, and a state with a Map field.
+-- A key with no value gives the zero value. A set of the zero value removes the key.
+def m0 : Map Nat Nat := mapEmpty
+def m1 : Map Nat Nat := mapSet (mapSet m0 3 4) 1 2
+def m2 : Map Nat Nat := mapSet (mapSet m0 1 2) 3 4
+def gMiss : Nat := mapGet m1 7
+def gHit : Nat := mapGet m1 3
+def mZero : Map Nat Nat := mapSet m1 3 0
+def aMap : Map Addr U256 := mapSet mapEmpty 0x00000000000000000000000000000000000000bb 7u
+def fm : Map Nat Flag := mapSet (mapSet mapEmpty 2 flagYes) 2 flagNo
+def fMiss : Flag := mapGet fm 2
+
+-- The laws: the order of the sets, the zero value, the last write, get after set.
+def lawOrder : Eq (Map Nat Nat) m1 m2 := refl
+def lawZero : Eq (Map Nat Nat) mZero (mapSet m0 1 2) := refl
+def lawLast : Eq (Map Nat Nat) (mapSet (mapSet m1 1 9) 1 5) (mapSet m1 1 5) := refl
+def lawGetSet : Eq Nat (mapGet (mapSet m1 8 6) 8) 6 := refl
+def lawGetOther : Eq Nat (mapGet (mapSet m1 8 6) 3) (mapGet m1 3) := refl
+
+-- A state with a Map field (top level only). The start state of `langc run`.
+state State := makeState (books : Map Nat U256) (cursor : Nat)
+def init : State := makeState mapEmpty 0
+
+-- Entry: set the book at the id, and record the time.
+def setBook : (env : Env) -> (s : State) -> (id : Nat) -> (amount : U256) -> Option (Prod State (List Out)) :=
+  fun (env : Env) (s : State) (id : Nat) (amount : U256) =>
+    some (pair (makeState (mapSet (books s) id amount) (now env)) nil)
+
+-- View: the book at the id.
+def book : (env : Env) -> (s : State) -> (id : Nat) -> U256 :=
+  fun (env : Env) (s : State) (id : Nat) => mapGet (books s) id
+
+-- Helpers: a Map has no ABI type, so a Map argument or a Map result is not an entry or a view.
+def putAll : (env : Env) -> (s : State) -> (m : Map Nat U256) -> Option (Prod State (List Out)) :=
+  fun (env : Env) (s : State) (m : Map Nat U256) => some (pair (makeState m (cursor s)) nil)
+def allBooks : (env : Env) -> (s : State) -> Map Nat U256 := fun (env : Env) (s : State) => books s

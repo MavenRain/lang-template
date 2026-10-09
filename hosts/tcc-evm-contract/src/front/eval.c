@@ -25,7 +25,8 @@ static const char *const OP_NAMES[] = {
   [OP_FLAG_IF] = "flagIf", [OP_U256_ADD] = "u256Add", [OP_U256_SUB] = "u256Sub",
   [OP_U256_MUL] = "u256Mul", [OP_U256_DIV] = "u256Div", [OP_U256_LE] = "u256Le",
   [OP_U256_EQ] = "u256Eq", [OP_U256_MIN] = "u256Min", [OP_TO_U256] = "toU256",
-  [OP_ADDR_EQ] = "addrEq", [OP_PROJ] = "?"
+  [OP_ADDR_EQ] = "addrEq", [OP_PROJ] = "?", [OP_KMAP] = "Map", [OP_KMAP_OF] = "mapOf",
+  [OP_KMAP_GET] = "mapGet", [OP_KMAP_SET] = "mapSet"
 };
 
 /* The number of arguments of each operation. VARIES: it comes from the
@@ -44,7 +45,7 @@ static const unsigned char OP_ARITY[] = {
   [OP_NAT_EQ] = 2, [OP_NAT_LE] = 2, [OP_FLAG_IF] = 3, [OP_U256_ADD] = 2,
   [OP_U256_SUB] = 2, [OP_U256_MUL] = 2, [OP_U256_DIV] = 2, [OP_U256_LE] = 2,
   [OP_U256_EQ] = 2, [OP_U256_MIN] = 2, [OP_TO_U256] = 1, [OP_ADDR_EQ] = 2,
-  [OP_PROJ] = 1
+  [OP_PROJ] = 1, [OP_KMAP] = 2, [OP_KMAP_OF] = VARIES, [OP_KMAP_GET] = 3, [OP_KMAP_SET] = 4
 };
 
 typedef enum {
@@ -841,6 +842,80 @@ static const Value *reduce_proj(Machine *m, uint32_t inst, uint32_t field, const
   return at < x->argc ? x->args[at] : internal(m, "a projection of a missing field");
 }
 
+/* Slice K4a0. The zero value of the word type V: a key with no value gives it. */
+static const Value *kmap_zero(Machine *m, const Value *v) {
+  static const U256 zero = {{0, 0, 0, 0}};
+  if (val_is(v, OP_FLAG))
+    return flag(m, 0);
+  if (val_is(v, OP_U256) || val_is(v, OP_ADDR))
+    return val_word(m, val_is(v, OP_ADDR) ? WORD_ADDR : WORD_U256, &zero);
+  return val_is(v, OP_NAT) ? val_nat(m, 0) : internal(m, "a map value type that is not a word type");
+}
+
+static int kmap_is_zero(const Value *v) {
+  static const U256 zero = {{0, 0, 0, 0}};
+  return (v->kind == VAL_NAT && v->nat == 0u) || (v->kind == VAL_WORD && u256_cmp(v->word, &zero) == 0) || val_is(v, OP_FLAG_NO);
+}
+
+/* -1, 0 or 1. A key is a Nat, or a word of the key sort. */
+static int kmap_cmp(const Value *a, const Value *b) {
+  if (a->kind == VAL_WORD && b->kind == VAL_WORD)
+    return u256_cmp(a->word, b->word);
+  return a->nat < b->nat ? -1 : a->nat > b->nat ? 1 : 0;
+}
+
+/* mapGet V m k: the value at K, or the zero value of V. */
+static const Value *reduce_kmap_get(Machine *m, const Value *const *a, uint32_t n) {
+  const Value *out;
+  uint32_t i;
+  if (blocked(m, a[1], OP_KMAP_GET, 0, 0, a, n, &out) || blocked(m, a[2], OP_KMAP_GET, 0, 0, a, n, &out))
+    return out;
+  if (!val_is(a[1], OP_KMAP_OF))
+    return internal(m, "a mapGet of a value that is not a map");
+  for (i = 0; i + 1u < a[1]->argc; i += 2u) {
+    if (kmap_cmp(a[1]->args[i], a[2]) == 0)
+      return a[1]->args[i + 1u];
+  }
+  return kmap_zero(m, a[0]);
+}
+
+/* mapSet V m k v: the map with V at K. The keys stay in order and a zero
+   value removes the key, so the form is canonical and conversion is
+   structural. */
+static const Value *reduce_kmap_set(Machine *m, const Value *const *a, uint32_t n) {
+  const Value *map = a[1];
+  const Value **items;
+  const Value *out;
+  uint32_t count = 0;
+  uint32_t i;
+  int placed;
+  if (blocked(m, map, OP_KMAP_SET, 0, 0, a, n, &out) || blocked(m, a[2], OP_KMAP_SET, 0, 0, a, n, &out) || blocked(m, a[3], OP_KMAP_SET, 0, 0, a, n, &out))
+    return out;
+  if (!val_is(map, OP_KMAP_OF))
+    return internal(m, "a mapSet of a value that is not a map");
+  items = arena_alloc(m->arena, ((size_t)map->argc + 2u) * sizeof *items);
+  if (items == NULL)
+    return oom(m);
+  placed = kmap_is_zero(a[3]);
+  for (i = 0; i + 1u < map->argc; i += 2u) {
+    int order = kmap_cmp(map->args[i], a[2]);
+    if (order > 0 && !placed) {
+      items[count++] = a[2];
+      items[count++] = a[3];
+      placed = 1;
+    }
+    if (order != 0) {
+      items[count++] = map->args[i];
+      items[count++] = map->args[i + 1u];
+    }
+  }
+  if (!placed) {
+    items[count++] = a[2];
+    items[count++] = a[3];
+  }
+  return val_op(m, VAL_OP, OP_KMAP_OF, 0, 0, items, count);
+}
+
 static uint32_t varied_arity(const Machine *m, Op op, uint32_t inst) {
   const CtorInfo *c = inst < m->ctor_count ? &m->ctors[inst] : NULL;
   const FamilyInfo *f = inst < m->family_count ? &m->families[inst] : NULL;
@@ -856,6 +931,8 @@ static uint32_t varied_arity(const Machine *m, Op op, uint32_t inst) {
 static int arity_ok(const Machine *m, Op op, uint32_t inst, uint32_t n) {
   if ((size_t)op >= sizeof OP_ARITY)
     return 0;
+  if (op == OP_KMAP_OF)
+    return n % 2u == 0u;
   if (OP_ARITY[op] != VARIES)
     return n == (uint32_t)OP_ARITY[op];
   return n == varied_arity(m, op, inst);
@@ -889,7 +966,13 @@ static const Value *reduce_op(Machine *m, Op op, uint32_t inst, uint32_t field, 
   case OP_PACK:
   case OP_REFL:
   case OP_CTOR:
+  case OP_KMAP:
+  case OP_KMAP_OF:
     return val_op(m, VAL_OP, op, inst, field, a, n);
+  case OP_KMAP_GET:
+    return reduce_kmap_get(m, a, n);
+  case OP_KMAP_SET:
+    return reduce_kmap_set(m, a, n);
   case OP_FIRST:
     return reduce_part(m, op, a, n, OP_PAIR, 0);
   case OP_SECOND:
@@ -1409,6 +1492,24 @@ static void print_other(Printer *p, const Value *v, int atom) {
     put(p, ")");
 }
 
+/* A map prints as mapOf [(K, V), (K, V)] (slice K4a0). */
+static void print_kmap(Printer *p, const Value *v, int atom) {
+  uint32_t i;
+  if (atom)
+    put(p, "(");
+  put(p, "mapOf [");
+  for (i = 0; i + 1u < v->argc && !p->full; i += 2u) {
+    put(p, i == 0u ? "(" : ", (");
+    print_value(p, v->args[i], 0);
+    put(p, ", ");
+    print_value(p, v->args[i + 1u], 0);
+    put(p, ")");
+  }
+  put(p, "]");
+  if (atom)
+    put(p, ")");
+}
+
 /* An operation prints as its name and its arguments. The last argument is
    printed in the loop, so a long list does not nest. */
 static void print_value(Printer *p, const Value *v, int atom) {
@@ -1420,7 +1521,7 @@ static void print_value(Printer *p, const Value *v, int atom) {
     return;
   }
   p->depth++;
-  while (is_chain(v) && !p->full) {
+  while (is_chain(v) && !val_is(v, OP_KMAP_OF) && !p->full) {
     if (atom) {
       put(p, "(");
       open++;
@@ -1434,7 +1535,10 @@ static void print_value(Printer *p, const Value *v, int atom) {
     v = v->args[v->argc - 1u];
     atom = 1;
   }
-  print_other(p, v, atom);
+  if (val_is(v, OP_KMAP_OF))
+    print_kmap(p, v, atom);
+  else
+    print_other(p, v, atom);
   for (i = 0; i < open; i++)
     put(p, ")");
   p->depth--;

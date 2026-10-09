@@ -1,0 +1,7 @@
+1 setBook ok
+2 setBook ok
+3 book = 5u
+4 book = 0u
+5 setBook ok
+6 book = 0u
+state makeState (mapOf [(1, 7u)]) 104
