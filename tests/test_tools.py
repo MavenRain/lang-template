@@ -252,6 +252,21 @@ class HostListTests(unittest.TestCase):
         columns = [cell.split(" (")[0] for cell in header[0].split(" | ")]
         self.assertEqual(columns, hosts)
 
+    def test_formers_prose_lists_exactly_the_hosts(self):
+        # The formers host-file list and the section 5 provenance prose also
+        # name the hosts by hand, in the order of the hosts array.
+        hosts = self.hosts()
+        formers = (ROOT / "formers/FORMERS.md").read_text()
+        files = re.findall(r"Each host file\s+\((.*?)\)\s+gives the", formers, re.DOTALL)
+        self.assertEqual(len(files), 1, files)
+        self.assertEqual(re.findall(r"`hosts/([a-z0-9-]+)/FORMERS\.md`", files[0]), hosts)
+        sections = re.findall(r"^## 5\. Realization matrix$(.*?)^\| ID \| Former \|",
+                              formers, re.MULTILINE | re.DOTALL)
+        self.assertEqual(len(sections), 1, sections)
+        facts = re.findall(r"([a-z][a-z0-9-]*)(?: and ([a-z][a-z0-9-]*))? facts come from",
+                           " ".join(sections[0].split()))
+        self.assertEqual([host for pair in facts for host in pair if host], hosts)
+
 
 class TccKitTests(unittest.TestCase):
     """Make a language from each real TinyCC kit and run its own gate."""
