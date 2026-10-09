@@ -69,6 +69,10 @@ int asm_finish(Asm *a, FILE *err);
    Returns 1, or 0 after a message on ERR. */
 int asm_creation(Asm *a, const Asm *runtime, FILE *err);
 
+/* As asm_creation, but the creation code first runs STORE, code with no
+   labels (slice K4a: the SSTOREs of the start state). STORE can be NULL. */
+int asm_creation_store(Asm *a, const Asm *store, const Asm *runtime, FILE *err);
+
 /* Lowercase hex, no 0x, one newline. Returns 1, or 0 after a message on ERR. */
 int asm_write_hex(const Asm *a, FILE *out, FILE *err);
 

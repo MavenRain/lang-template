@@ -1,0 +1,2 @@
+-- REFUSE_LOWER (slice K4a): a build needs a state and init.
+def answer : Nat := 7

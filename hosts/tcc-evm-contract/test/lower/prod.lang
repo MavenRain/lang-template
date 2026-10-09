@@ -1,0 +1,3 @@
+-- REFUSE_LOWER (slice K4a): a Prod field has no storage form.
+state State := makeState (both : Prod Nat Flag)
+def init : State := makeState (pair 1 flagYes)

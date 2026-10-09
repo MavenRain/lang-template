@@ -1,0 +1,9 @@
+-- The storage layout (slice K4a): one field of each form that `langc build`
+-- stores. Fields at slots 0 to 7; zero words are not stored.
+state State := makeState (owner : Addr) (open : Flag) history (held : U256) (count : Nat)
+  (paid : List U256) (books : Map Addr U256) (marks : Map Nat Flag) (spare : Nat)
+
+def init : State := makeState 0x00000000000000000000000000000000000000aa flagYes 18446744073709551621u 7
+  (cons 5u (cons 0u (cons 9u nil)))
+  (mapSet (mapSet mapEmpty 0x00000000000000000000000000000000000000bb 4u) 0x00000000000000000000000000000000000000cc 6u)
+  (mapSet mapEmpty 3 flagYes) 0

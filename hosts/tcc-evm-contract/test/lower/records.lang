@@ -1,0 +1,3 @@
+-- REFUSE_LOWER (slice K4a): a List of records has no storage form.
+state State := makeState (rows : List (Prod Nat Nat))
+def init : State := makeState nil

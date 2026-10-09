@@ -1,10 +1,12 @@
 /* The langc command line. SHARED by the tcc kits.
    Exit 0: ok. Exit 1: the program is refused. Exit 2: usage or IO. */
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "front/check.h"
 #include "front/front.h"
+#include "lower.h"
 #include "target.h"
 
 #define ARENA_LIMIT_BYTES ((size_t)1 << 30)
@@ -47,7 +49,7 @@ static int usage(FILE *err) {
         "       langc run PROG SCRIPT\n"
         "       langc ir PROG\n"
         "       langc abi PROG\n"
-        "       langc build PROG -o OUT [--runtime]\n", err);
+        "       langc build PROG [-o OUT] [--runtime]\n", err);
   return 2;
 }
 
@@ -70,7 +72,7 @@ static int parse_build_options(int argc, char **argv, Options *opt, Diag *diag) 
     opt->runtime |= is_runtime;
     i += is_out;
   }
-  return opt->out_path != NULL ? 1 : diag_fail(diag, "USAGE", NULL, "build needs -o OUT");
+  return 1;
 }
 
 static int parse_options(int argc, char **argv, Options *opt, Diag *diag) {
@@ -127,6 +129,36 @@ static const char *command_word(Command command) {
   return "?";
 }
 
+/* `langc build` (slice K4a): the code goes to a tmpfile first, so a refused
+   or failed build writes nothing on stdout or on OUT. Returns 0, 1 after a
+   refusal, or 2 after an IO_WRITE diagnostic. */
+static int build_command(Machine *m, const Options *opt, Diag *diag) {
+  FILE *code = tmpfile();
+  if (code == NULL) return diag_fail(diag, "IO_WRITE", NULL, "tmpfile: %s", strerror(errno)) + 2;
+  int status = lower_build(m, opt->runtime ? TARGET_PART_RUNTIME : TARGET_PART_MAIN, code);
+  if (status != 0) {
+    fclose(code);
+    return status;
+  }
+  rewind(code);
+  const char *name = opt->out_path != NULL ? opt->out_path : "stdout";
+  FILE *out = opt->out_path != NULL ? fopen(opt->out_path, "w") : stdout;
+  if (out == NULL) {
+    int error = errno;
+    fclose(code);
+    return diag_fail(diag, "IO_WRITE", NULL, "%s: %s", name, strerror(error)) + 2;
+  }
+  unsigned char buffer[1024];
+  size_t size = 0;
+  int failed = 0;
+  while (!failed && (size = fread(buffer, 1, sizeof buffer, code)) > 0) failed = fwrite(buffer, 1, size, out) != size;
+  failed = failed || ferror(code) || fflush(out) != 0 || ferror(out);
+  int error = errno;
+  fclose(code);
+  if (out != stdout && fclose(out) != 0) failed = 1;
+  return failed ? diag_fail(diag, "IO_WRITE", NULL, "%s: %s", name, strerror(error)) + 2 : 0;
+}
+
 static int run(const Options *opt, Arena *arena, Diag *diag) {
   char *text = NULL;
   size_t len = 0;
@@ -147,9 +179,10 @@ static int run(const Options *opt, Arena *arena, Diag *diag) {
       if (!read_source(arena, opt->script_path, &script, &script_len, diag)) return 2;
       return run_command(&machine, opt->script_path, script, script_len, stdout);
     }
+    case CMD_BUILD:
+      return build_command(&machine, opt, diag);
     case CMD_IR:
     case CMD_ABI:
-    case CMD_BUILD:
       break;
   }
   diag_fail(diag, "PLANNED", NULL, "the %s command is not built yet (target %s)", command_word(opt->command), target_name);

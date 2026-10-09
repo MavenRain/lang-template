@@ -1,7 +1,10 @@
 /* The EVM back end. Slice K4 builds the lowering and the contract code.
    Slice K1 keeps the target interface and the ABI selectors. */
 #include <stdio.h>
+#include <stdlib.h>
 
+#include "asm.h"
+#include "evm.h"
 #include "keccak.h"
 #include "target.h"
 
@@ -39,4 +42,39 @@ int target_write(const IrProgram *prog, TargetPart part, FILE *out, FILE *err) {
   (void)out;
   fputs("langc: PLANNED: -: the evm back end is not built yet (slice K4)\n", err);
   return 0;
+}
+
+static int is_zero(const unsigned char *w) {
+  for (int i = 0; i < 32; i++)
+    if (w[i] != 0) return 0;
+  return 1;
+}
+
+/* Slice K4a. The asm messages go to a null sink: the caller writes the
+   diagnostic from the return code. */
+EvmBuild evm_build(const unsigned char (*pairs)[64], size_t count, TargetPart part, FILE *out) {
+  Asm *a = calloc(3, sizeof(Asm));
+  FILE *sink = fopen("/dev/null", "w");
+  if (a == NULL || sink == NULL) {
+    free(a);
+    if (sink != NULL) fclose(sink);
+    return EVM_BUILD_OOM;
+  }
+  Asm *stores = &a[0], *runtime = &a[1], *code = &a[2];
+  for (size_t i = 0; i < count; i++) {
+    if (is_zero(pairs[i] + 32)) continue;
+    asm_push_word(stores, pairs[i] + 32);
+    asm_push_word(stores, pairs[i]);
+    asm_op(stores, EVM_OP_SSTORE);
+  }
+  asm_op(runtime, EVM_OP_PUSH0);
+  asm_op(runtime, EVM_OP_PUSH0);
+  asm_op(runtime, EVM_OP_REVERT);
+  EvmBuild result = stores->full || !asm_finish(runtime, sink) || !asm_creation_store(code, stores, runtime, sink)
+                        ? EVM_BUILD_SIZE
+                    : asm_write_hex(part == TARGET_PART_RUNTIME ? runtime : code, out, sink) ? EVM_BUILD_OK
+                                                                                            : EVM_BUILD_WRITE;
+  fclose(sink);
+  free(a);
+  return result;
 }

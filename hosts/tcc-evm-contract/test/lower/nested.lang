@@ -1,0 +1,3 @@
+-- REFUSE_LOWER (slice K4a): a nested List has no storage form.
+state State := makeState (rows : List (List Nat))
+def init : State := makeState nil

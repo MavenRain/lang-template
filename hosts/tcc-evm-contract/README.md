@@ -7,7 +7,7 @@ The TinyCC host kit of retainer-lang. It compiles the contract language to EVM b
 - The front end, `src/main.c`, `src/ir.h`, `src/target.h`, `gen/`, `domain/`, `examples/` and `test/gate.sh` are copies of `hosts/tcc-wasm`. The SHA-256 of each source file is in `lang-template-work/tcc-evm-contract-snapshot.txt`, with a list of the changes.
 - `src/asm.c` and `src/asm.h` come from the escrowc assembler (escrow-lang `src/evm.c`). The labels are numbers, not a fixed enum.
 - `src/keccak.c` and `src/keccak.h` are copies of the escrowc files. Only the names are changed.
-- `src/evm.c` is the EVM target. It writes the ABI selectors. The bytecode output comes in slice K4.
+- `src/evm.c` is the EVM target. It writes the ABI selectors and the code of `langc build` (`evm_build` in `src/evm.h`). `src/lower.c` gives it the storage words of `init` (slice K4a). The dispatch, the logs and the calls come in slices K4b to K4d.
 
 ## Slices
 
@@ -20,6 +20,7 @@ The TinyCC host kit of retainer-lang. It compiles the contract language to EVM b
 | K3c | History rule: REFUSE_HISTORY_WRITE | Done |
 | K4a0 | Map former (front end) | Done |
 | K4a1 | Named events (front end) | Done |
+| K4a | Build output and storage layout | Done |
 | K4 to K5 | See the retainer-lang brief | Planned |
 
 
@@ -52,7 +53,7 @@ Prelude names:
 | `toU256` | `Nat -> U256` | The same number as a U256. This is the only conversion. |
 | `addrEq` | `Addr -> Addr -> Flag` | `flagYes` when the two addresses are equal. |
 
-The helpers are in `src/front/u256.c`. They use no `__int128` and no shift by 64 or more. `examples/words.lang` has the laws and the eval cases. The EVM output for these types is planned for slice K4: `langc build` still stops with `langc: PLANNED: ...`.
+The helpers are in `src/front/u256.c`. They use no `__int128` and no shift by 64 or more. `examples/words.lang` has the laws and the eval cases. The storage form of these types is in `## EVM output (slice K4)`. The IR scalars for U256 and Addr come in slice K4b.
 
 ## Contracts (slice K3)
 
@@ -199,12 +200,36 @@ event Paid (to : Addr) (amount : U256)
 state makeState 7u
 ```
 
+## EVM output (slice K4)
+
+Slice K4a writes the creation code of a contract. `src/lower.c` walks the state of `init` and makes a list of (slot, value) words. `evm_build` in `src/evm.c` makes the code from that list. `src/evm.h` has no front-end type.
+
+- `langc build` evaluates `init` with the evaluator of `langc eval`. The creation code has PUSH value, PUSH slot, SSTORE for each word that is not zero. Then it copies the runtime and returns it.
+- The runtime of slice K4a is PUSH0 PUSH0 REVERT (`5f5ffd`). The dispatch comes in slice K4b.
+
+Storage layout:
+
+- Field i of the state is at slot i. A `history` field uses the rule of its type.
+- Words: Nat is a u64 in the low bits. Flag is 0 or 1. U256 is the full word. Addr is in the low 160 bits.
+- A `List T` field at slot s (T is a word type): the length is at slot s. Element j is at slot keccak256(s) + j.
+- A `Map K V` field at slot s (K and V are word types): the value at key k is at slot keccak256(k . s). k and s are 32-byte big-endian words. A key that is not in the map reads as zero.
+
+Output:
+
+- One line of lowercase hex, with no `0x` and a newline at the end. It goes to stdout, or to OUT with `-o OUT`.
+- The output goes into a temporary buffer first. A refused build writes nothing on stdout, keeps an existing OUT and makes no new OUT.
+- Exit 0: the build is correct. Exit 1: `langc: REFUSE_LOWER: ...` or another refusal. Exit 2: `langc: IO_WRITE: -: stdout: ...` when a write fails.
+
+REFUSE_LOWER refuses a state that has no storage form in slice K4a: an Option field, a Prod field, a List of a type that is not a word, a nested List, a Map with a key or a value that is not a word, an `init` with arguments, and a program with no state or no `init`. `langc check` refuses a Map with a List value first (REFUSE_MAP).
+
+`test/build.sh` builds `examples/contract.lang`, `examples/map.lang` and `examples/storage.lang`, runs each code with `evm run --create --dump` and compares each storage slot with `langc eval PROG init`. `build/slottool HEX` computes the keccak256 slots. The script also runs the rows of `test/lower/expect.txt` and the output cases.
+
 ## Commands
 
 - `make check`: the tcc build with `-Wall -Werror`, the clang syntax pass, `test/gate.sh`, `test/run.sh` and `test/asm.sh`. `test/asm.sh` needs geth `evm` on PATH.
 - `build/langc check FILE` and `build/langc eval FILE`: as in tcc-wasm.
 - `build/langc run PROG SCRIPT`: does the calls in `SCRIPT` on the program `PROG`. Refer to `## Contracts (slice K3)`. `test/run.sh` runs each `test/run/NAME.script` on `examples/contract.lang` and compares the output with `test/run/NAME.out`. It also has 8 refusal rows and a usage row. `build/runtool` checks fresh fuel for initialization and call classification.
-- `build/langc build FILE` stops with `langc: PLANNED: ...` until slice K4.
+- `build/langc build FILE [-o OUT] [--runtime]` writes the creation code (with `--runtime`, the runtime code) as one line of lowercase hex. Refer to `## EVM output (slice K4)`.
 - `build/asmtool`: the assembler self-test. `build/asmtool runtime|creation|abi` writes the test program or its ABI line.
 
 The tool versions and the test path for K4 are in `docs/CAPABILITY.md`.
