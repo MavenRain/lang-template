@@ -1,6 +1,6 @@
 -- A call script for examples/contract.lang (kit slice K3b).
 -- Each call is NOW CALLER NAME ARGS. This script has an ok call, a revert,
--- a trap, a view and an emit.
+-- a trap, a view and an event.
 100 0x00000000000000000000000000000000000000bb deposit 5u
 101 0x00000000000000000000000000000000000000bb withdraw 9u
 

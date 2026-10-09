@@ -1,9 +1,12 @@
--- Contracts (kit slice K3a): the state, the start state, entries, a helper and a view.
+-- Contracts (kit slice K3a): the state, the start state, an event, entries, a helper and a view.
 -- The contract prelude gives Env (now, caller) and Out (pay, pull, emit).
 state State := makeState (owner : Addr) (held : U256) history (earned : U256) (cursor : Nat)
 
 def asset : Addr := 0x00000000000000000000000000000000000000ee
 def vault : Addr := 0x00000000000000000000000000000000000000cc
+
+-- The event of stamp (slice K4a1). `langc build` refuses emit (C-K4c-2).
+event Stamped (held : U256) (earned : U256)
 
 -- The start state of `langc run` (K3b).
 def init : State := makeState 0x00000000000000000000000000000000000000aa 0u 0u 0
@@ -22,11 +25,11 @@ def withdraw : (env : Env) -> (s : State) -> (amount : U256) -> Option (Prod Sta
         (cons (pay asset (owner s) amount) nil)))
       none
 
--- Entry with no arguments: record the time and emit held and earned.
+-- Entry with no arguments: record the time and log held and earned (event Stamped).
 def stamp : (env : Env) -> (s : State) -> Option (Prod State (List Out)) :=
   fun (env : Env) (s : State) =>
     some (pair (makeState (owner s) (held s) (earned s) (now env))
-      (cons (emit 1 (cons (held s) (cons (earned s) nil))) nil))
+      (cons (Stamped (held s) (earned s)) nil))
 
 -- Helper (no Env): add to the history field earned.
 def checkpoint : State -> U256 -> State :=

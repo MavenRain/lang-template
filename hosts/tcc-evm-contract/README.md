@@ -72,7 +72,7 @@ family Out := pay (payToken : Addr) (payTo : Addr) (payAmount : U256)
 - `Env` gives the time of the call (`now`) and the address of the caller (`caller`).
 - `Out` is one effect of an entry. `pay` sends tokens to an address. `pull` moves tokens from an address. `emit` writes an event.
 - `emit` stays in slice K4a1. A program can also declare named events (refer to `## Events (slice K4a1)`).
-- Slice K4c writes a LOG only for a named event, thus K4c has no LOG form for `emit`. The project owner rules on `emit` before slice K4c: remove it or refuse it.
+- Slice K4c writes a LOG only for a named event, thus `emit` has no EVM form. `langc build` refuses an entry that makes an `emit` (REFUSE_LOWER, `test/lower/emit.lang`). `langc check`, `langc eval` and `langc run` keep `emit`.
 
 The state form:
 
@@ -137,7 +137,7 @@ The output has one line for each call. The calls have the numbers 1, 2, 3 and so
   pay 0x00000000000000000000000000000000000000ee 0x00000000000000000000000000000000000000aa 2u
 5 balance = 3u
 6 stamp ok
-  emit 1 (cons 3u (cons 2u nil))
+  event Stamped 3u 2u
 state makeState 0x00000000000000000000000000000000000000aa 3u 2u 105
 ```
 
@@ -248,7 +248,7 @@ Output:
 
 REFUSE_LOWER refuses a state that has no storage form in slice K4a: an Option field, a Prod field, a List of a type that is not a word, a nested List, a Map with a key or a value that is not a word, an `init` with arguments, and a program with no state or no `init`. `langc check` refuses a Map with a List value first (REFUSE_MAP).
 
-REFUSE_LOWER also refuses an entry body that slice K4b does not lower: a write of a List field (`test/lower/list-write.lang`), a `fold` at a word position (`test/lower/nat-fold.lang`), and each other residual that is not first-order word code. A def with the type of an entry and an argument that is not a word is a helper, not an entry: it is not in the dispatcher.
+REFUSE_LOWER also refuses an entry body that slice K4b does not lower: a write of a List field (`test/lower/list-write.lang`), a `fold` at a word position (`test/lower/nat-fold.lang`), and each other residual that is not first-order word code. It also refuses an entry that makes an `emit` (`test/lower/emit.lang`), because `emit` has no EVM form: use a named event. A def with the type of an entry and an argument that is not a word is a helper, not an entry: it is not in the dispatcher.
 
 The other refusals of `langc build` (exit 1, no output):
 

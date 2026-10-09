@@ -468,11 +468,21 @@ static int lower_state_write(Low *l, Stmts *b, const Value *st) {
   return push(l, b, new_stmt(l, IR_STMT_STOP));
 }
 
+/* 1 when V is the prelude constructor emit of Out. emit has no EVM form, thus
+   an entry that makes an emit gives REFUSE_LOWER (C-K4c-2). */
+static int is_emit(const Low *l, const Value *v) {
+  const CtorInfo *c = is_op(v, OP_CTOR) && v->inst < l->m->ctor_count ? &l->m->ctors[v->inst] : NULL;
+  return c != NULL && !c->event && c->family < l->m->family_count
+         && strcmp(l->m->families[c->family].name, "Out") == 0 && strcmp(c->name, "emit") == 0;
+}
+
 /* Force the words of ignored outputs before any state store. Keep flagIf
-   branches lazy, including at List positions and within emit fields. */
+   branches lazy, including at List positions and within event fields. */
 static int lower_out_words(Low *l, Stmts *b, const Value *v) {
   uint32_t field;
   if (val_is(v, OP_NIL)) return 1;
+  if (is_emit(l, v))
+    return diag_fail(l->m->diag, "REFUSE_LOWER", l->entry, "emit has no EVM form; use a named event");
   if (is_op(v, OP_FLAG_IF) && v->argc == 3) {
     const IrExpr *cond = lower_expr(l, b, v->args[0]);
     Stmts yes = {NULL, 0, 0};

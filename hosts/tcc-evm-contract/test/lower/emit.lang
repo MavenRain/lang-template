@@ -1,0 +1,7 @@
+-- REFUSE_LOWER (slice K4c, C-K4c-2): an entry that makes an emit. emit has no EVM form: use a named event.
+-- The emit is in a flagIf branch, thus the refusal does not need the call arguments.
+state State := makeState (cursor : Nat)
+def init : State := makeState 0
+
+def stamp : (env : Env) -> (s : State) -> (f : Flag) -> Option (Prod State (List Out)) :=
+  fun (env : Env) (s : State) (f : Flag) => some (pair (makeState (now env)) (flagIf f (cons (emit 1 nil) nil) nil))

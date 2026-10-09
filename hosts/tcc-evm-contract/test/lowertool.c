@@ -111,8 +111,8 @@ int main(void) {
   ok &= regression("pay-trap", ENTRY
     "some (pair (makeState 9) (cons (pay " TOKEN " " TOKEN " (u256Div 7u 0u)) nil))\n",
     1, 0, 1, 0, 0, 0);
-  ok &= regression("emit-fields-trap", ENTRY
-    "some (pair (makeState 9) (cons (emit 1 (cons (u256Div 7u 0u) nil)) nil))\n",
+  ok &= regression("event-fields-trap", "event Logged (x : U256)\n" ENTRY
+    "some (pair (makeState 9) (cons (Logged (u256Div 7u 0u)) nil))\n",
     1, 0, 1, 0, 0, 0);
   ok &= regression("pay-symbolic-div",
     "def entry : Env -> State -> U256 -> Option (Prod State (List Out)) := fun env s x => "
