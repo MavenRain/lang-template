@@ -267,6 +267,29 @@ class HostListTests(unittest.TestCase):
                            " ".join(sections[0].split()))
         self.assertEqual([host for pair in facts for host in pair if host], hosts)
 
+    def test_root_lists_follow_the_hosts(self):
+        # The Makefile check recipe and the bin/new-lang.sh gate case name the
+        # hosts by hand, in the order of the hosts array. The README.md "make
+        # test" item names the TccKitTests hosts, in the same order.
+        hosts = self.hosts()
+        recipes = re.findall(r"^check:.*?$(.*?)^[a-z-]+:", (ROOT / "Makefile").read_text(),
+                             re.MULTILINE | re.DOTALL)
+        self.assertEqual(len(recipes), 1, recipes)
+        self.assertEqual(re.findall(r"^\t@if \[ -f hosts/([a-z0-9-]+)/(?:Makefile|gate\.sh) \]",
+                                    recipes[0], re.MULTILINE), hosts)
+        cases = re.findall(r"^case \$host in$(.*?)^esac$",
+                           (ROOT / "bin/new-lang.sh").read_text(), re.MULTILINE | re.DOTALL)
+        self.assertEqual(len(cases), 1, cases)
+        arms = re.findall(r"^  ([a-z0-9| -]+)\) ", cases[0], re.MULTILINE)
+        self.assertEqual([host.strip() for arm in arms for host in arm.split("|")], hosts)
+        kits = re.findall(r'^\s+self\.generate_and_check\("([a-z0-9-]+)"',
+                          (ROOT / "tests/test_tools.py").read_text(), re.MULTILINE)
+        self.assertEqual([host for host in hosts if host in kits], kits)
+        lines = re.findall(r"tests make a language from (.*?) and run its gate",
+                           " ".join((ROOT / "README.md").read_text().split()))
+        self.assertEqual(len(lines), 1, lines)
+        self.assertEqual(re.findall(r"`hosts/([a-z0-9-]+)`", lines[0]), kits)
+
 
 class TccKitTests(unittest.TestCase):
     """Make a language from each real TinyCC kit and run its own gate."""
