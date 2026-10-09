@@ -9,8 +9,8 @@ The forms below use one abstract syntax: the surface syntax of ledger-lang
 `SPEC.md` sections 3 and 4 (commit 997fa7b). escrow-lang `SPEC.md` sections 2
 and 3 (commit 279214c) write the same formers in assay forms. Each host file
 (`hosts/mech/FORMERS.md`, `hosts/assay/FORMERS.md`, `hosts/tcc-json/FORMERS.md`,
-`hosts/tcc-wasm/FORMERS.md`, `hosts/tcc-evm/FORMERS.md`,
-`hosts/tcc-evm-contract/FORMERS.md`, `hosts/tcc-evm-dao/FORMERS.md`,
+`hosts/tcc-evm-contract/FORMERS.md`, `hosts/tcc-wasm/FORMERS.md`,
+`hosts/tcc-evm/FORMERS.md`, `hosts/tcc-evm-dao/FORMERS.md`,
 `hosts/tcc-evm-anchor/FORMERS.md`) gives the
 host form of each former and its status. Section 5 of this file is the
 realization matrix.
@@ -251,17 +251,17 @@ that a host cannot satisfy makes the status PARTIAL or HOST-LIMIT.
 Each cell gives the status and the source of the fact at the origin commit.
 mech facts come from ledger-lang 997fa7b. assay facts come from escrow-lang
 279214c. tcc-json facts come from `hosts/tcc-json` in this repository.
+tcc-evm-contract facts come from `hosts/tcc-evm-contract` in this repository
+at commit eaa4c74. The tcc-evm-contract front end is a copy of the tcc-wasm
+front end. Its cells give the status in `langc check` and `langc eval`. The
+EVM output of each former is PLANNED until slice K4
+(`hosts/tcc-evm-contract/FORMERS.md:3-8`).
 tcc-wasm and tcc-evm facts come from `hosts/tcc-wasm` and `hosts/tcc-evm` in
 this repository. The two kits share the front end, so each former has the
 same status in both kits.
-tcc-evm-contract and tcc-evm-dao facts come from `hosts/tcc-evm-contract` and
-`hosts/tcc-evm-dao` in this repository at commit eaa4c74. The tcc-evm-contract
-front end is a copy of the tcc-wasm front end. Its cells give the status in
-`langc check` and `langc eval`. The EVM output of each former is PLANNED until
-slice K4 (`hosts/tcc-evm-contract/FORMERS.md:3-8`). The tcc-evm-dao cells give
-the status in `langc check` and `langc eval`
-(`hosts/tcc-evm-dao/FORMERS.md:5-6`). For F7 the host file writes ABSENT. This
-matrix writes HOST-LIMIT, the section 4 word for that probe fact.
+tcc-evm-dao facts come from `hosts/tcc-evm-dao` in this repository at commit
+eaa4c74. Its cells give the status in `langc check` and `langc eval`
+(`hosts/tcc-evm-dao/FORMERS.md:5-6`).
 tcc-evm-anchor facts come from `hosts/tcc-evm-anchor` in this repository at
 commit 5bec924. Its cells give the status in the checker. No former runs on
 the EVM: the runtime reads the outcomes from the table

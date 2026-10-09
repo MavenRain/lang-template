@@ -15,7 +15,7 @@ in `docs/CAPABILITY.md`, section Kernel.
 | F4 | List | PARTIAL: no generic `List`. One `mu` for each element type: `Ballots`, `Claims` |
 | F5 | Monad pure/map/bind | DONE over Option and Sum. PARTIAL over lists: one set for `Ballots` and one for `Claims` |
 | F6 | Algebra fold | PARTIAL: `foldBallots` and `foldClaims` (structural `def rec`), generic in the result type only |
-| F7 | Algebra unfold | ABSENT: no structural measure (`docs/CAPABILITY.md`, section Kernel); `nu` is a refused form |
+| F7 | Algebra unfold | HOST-LIMIT: no structural measure (`docs/CAPABILITY.md`, section Kernel); `nu` is a refused form |
 | F8 | Filter | DONE over Option (`filterOption`). PARTIAL over lists: `filterBallots`, `filterClaims` |
 | F9 | Non-dependent Pi | DONE: `A -> B` |
 | F10 | Dependent Pi | DONE: `(x : A) -> B` and the erased binder `(0 x : A)`; `cast` in `domain/domain.lang` |
