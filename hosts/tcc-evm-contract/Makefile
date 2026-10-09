@@ -10,11 +10,12 @@ TOOL = test/asmtool.c $(TARGET)
 FRONT_TOOL = test/fronttool.c $(filter-out src/front/front.c,$(FRONT))
 RUN_TOOL = test/runtool.c $(FRONT)
 SLOT_TOOL = test/slottool.c src/keccak.c
+BUILD_TOOL = test/buildtool.c $(TARGET)
 HEADERS = $(wildcard src/*.h src/front/*.h)
 
 .PHONY: build check check-clang clean
 
-build: build/langc build/asmtool build/fronttool build/runtool build/slottool
+build: build/langc build/asmtool build/fronttool build/runtool build/slottool build/buildtool
 
 build/domain.c: domain/domain.lang gen/embed.c
 	mkdir -p build
@@ -38,14 +39,19 @@ build/slottool: $(SLOT_TOOL) $(HEADERS)
 	mkdir -p build
 	$(TCC) $(CFLAGS) -o build/slottool $(SLOT_TOOL)
 
+build/buildtool: $(BUILD_TOOL) $(HEADERS)
+	mkdir -p build
+	$(TCC) $(CFLAGS) -o build/buildtool $(BUILD_TOOL)
+
 check-clang: build/domain.c
 	$(CC) $(CLANG_FLAGS) $(SRC) build/domain.c
 	$(CC) $(CLANG_FLAGS) $(TOOL)
 	$(CC) $(CLANG_FLAGS) $(FRONT_TOOL)
 	$(CC) $(CLANG_FLAGS) $(RUN_TOOL) build/domain.c
 	$(CC) $(CLANG_FLAGS) $(SLOT_TOOL)
+	$(CC) $(CLANG_FLAGS) $(BUILD_TOOL)
 
-check: build/langc build/asmtool build/fronttool build/runtool build/slottool check-clang
+check: build/langc build/asmtool build/fronttool build/runtool build/slottool build/buildtool check-clang
 	sh test/gate.sh
 	sh test/run.sh
 	sh test/asm.sh
@@ -53,6 +59,7 @@ check: build/langc build/asmtool build/fronttool build/runtool build/slottool ch
 	sh test/review.sh
 	build/fronttool
 	build/runtool
+	build/buildtool
 
 clean:
 	rm -rf build

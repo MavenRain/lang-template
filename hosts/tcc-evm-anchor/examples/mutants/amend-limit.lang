@@ -1,0 +1,25 @@
+-- Expected: AMEND_LIMIT (SPEC section 7; chunk 10 refuses it, this file
+-- parses).  This is examples/programs/arrow-debreu.lang with eight
+-- amendments, so the program has nine constitutions, and the limit is 8.
+def members : Nat := 3
+
+-- Candidate 0, the genesis policy: the log admits anchors.
+def openLog : Policy := mkPolicy allow nonZero blockTime 0 1 flagYes
+
+-- Candidate 1: the log admits no anchor.
+def closedLog : Policy := mkPolicy deny nonZero blockTime 0 1 flagYes
+
+def candidates : Candidates := consPolicy openLog (lastPolicy closedLog)
+
+def rule : Tally -> Outcome := fun (t : Tally) =>
+  case natLt (tallyCount 1 t) (tallyCount 0 t) with
+  | 0 (u : prod ()) => one closedLog
+  | 1 (u : prod ()) => one openLog
+
+def same : Constitution := constitutionOf rule
+
+def amendments : Constitutions :=
+  consConstitution same (consConstitution same (consConstitution same (consConstitution same
+    (consConstitution same (consConstitution same (consConstitution same (lastConstitution same)))))))
+
+def amendTo : Policy -> Nat -> Flag := fun (p : Policy) (k : Nat) => flagYes

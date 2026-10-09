@@ -1,6 +1,6 @@
-# anchor-lang host capability: TinyCC to EVM (M4, 2026-10-08)
+# anchor-lang host capability: TinyCC to EVM (M6 done, chunk 14, 2026-10-09)
 
-This file records what the `tcc-evm` host can do at the end of chunk 7
+This file records what the `tcc-evm` host can do at the end of chunk 14
 (SPEC section 10). The host is the C99 compiler `langc`, built by
 TinyCC. The target is EVM bytecode for one contract. Each fact cites a file
 or a test. PLANNED work has no evidence yet.
@@ -25,6 +25,14 @@ or a test. PLANNED work has no evidence yet.
   `abi` prints the entries and the `Anchored` log, and `build` writes
   the hex of the contract with the outcome table (chunk 5, SPEC section
   7). Both tabulate one time; a table refusal stops them with its code.
+  For a program with more than one constitution (O3, chunks 10 and 11),
+  `abi` also prints the `amend` entry and the `Amended` log, and `build`
+  writes the slot K + M, the C R rows and the policy records with the
+  `amendTo` mask (`test/build.sh`, `test/run.sh`). When some policy has
+  a `window` > 0 (O7, chunk 13), `abi` also prints the `dispute` entry
+  and the `Disputed` log. `build` writes the `window` in each policy
+  record: 17 bytes when C = 1, or 18 bytes with the `amendTo` mask when
+  C > 1 (`src/evm.c`, `test/build.sh`, `test/run.sh`).
 
 ## Limits
 
@@ -34,6 +42,12 @@ or a test. PLANNED work has no evidence yet.
   (`PARSE_DEPTH`; `src/syntax.h`, `test/parse.sh`).
 - The checker has `CHECK_FUEL` = 2^24 evaluation steps for each
   declaration and for the fork check (`TYPE_FUEL`, `src/check.c`).
+- A program has at most 8 constitutions (`AMEND_LIMIT`,
+  `examples/mutants/amend-limit.lang`). With C constitutions and R
+  tallies, a table has at most 4096 rows, C R (`TABLE_LIMIT`,
+  `test/table.sh`). A constitution k >= 1 tabulates only while the
+  evaluation of a profile of M ballots stays under `CHECK_DEPTH` = 4096
+  nested calls, else `TYPE_FUEL` (SPEC section 7).
 - Universes: `Type 0` has the type `Type 1`, and `Type 1` has no type
   (`TYPE_UNIVERSE`). An explicit `Type 1` annotation is refused. Pi,
   Sigma, product and sum formation take the maximum universe of their
@@ -47,7 +61,7 @@ or a test. PLANNED work has no evidence yet.
   has a smaller argument (`TYPE_REC`). `Nat` has no eliminator (prelude
   note P10). Thus the host has no unfold (F7).
 - The surface has no axiom form (SPEC section 2).
-- A table holds at most `TABLE_LIMIT` = 4096 tallies, C(members + K - 1,
+- For one constitution, a table holds at most 4096 tallies, C(members + K - 1,
   K - 1) for K candidates (`src/check.c`; `test/table.sh`: 4095 members
   and 2 candidates pass, 4096 members are `TABLE_LIMIT`).
 - The runtime code with the table bytes is at most `EVM_RUNTIME_MAX` =
@@ -72,8 +86,7 @@ The origin compiler is the compiler of SPEC section 8.
 - Keccak-256 (`src/keccak.c`). `test/evm.sh` checks the vectors.
 - EVM assembler (`src/evm.{h,c}`): opcodes, PUSH widths, labels 0 to 63
   with two passes for the PUSH2 offsets, the dispatch by the selector of a
-  signature, and the creation code. The runtime has the dispatch head and
-  the revert block only. Chunk 5a adds the constructor, the entries and
+  signature, and the creation code. Chunk 5a adds the constructor, the entries and
   `lang_abi_write` (SPEC section 7). The target interface is
   `lang_evm_write`. Codes: `EVM_LIMIT`, `EVM_SIZE`,
   `EVM_USAGE`, `EVM_IO`, `EVM_INTERNAL`.
@@ -94,7 +107,8 @@ Program refusals (SPEC section 2):
 | `REFUSE_DATA` | a `mu` in a program | `examples/mutants/data-decl.lang` |
 | `REFUSE_REC` | a `def rec` in a program | `examples/mutants/rec-def.lang` |
 | `REFUSE_NAME` | a program defines a prelude name or a core name | `examples/mutants/prelude-name.lang`, `examples/mutants/core-name.lang` |
-| `REFUSE_FORK` | a `two p q` side that is not frozen, or a fork that the check cannot see | `examples/mutants/fork-unfrozen.lang`, `test/check.sh` |
+| `REFUSE_FORK` | a `two p q` side that is not frozen, or a fork that the check cannot see | `examples/mutants/fork-unfrozen.lang`, `examples/mutants/amend-fork-unfrozen.lang`, `test/check.sh` |
+| `REFUSE_AMEND` | `amendments` with no `amendTo`, or `amendTo` with no `amendments` | `examples/mutants/amend-no-to.lang`, `examples/mutants/amend-to-only.lang` |
 | `REFUSE_AXIOM` | cannot be reached: the parser gives `PARSE_EXPECT` | `test/check.sh` |
 
 Type codes: `TYPE_SCOPE`, `TYPE_MISMATCH`, `TYPE_SHAPE`, `TYPE_MATCH`,
@@ -106,22 +120,25 @@ type of `rule`.
 
 The fork check is conservative (SPEC section 2). It explores each `case`
 and `match` arm of the outcomes of `rule` and of their freeze flags. Chunk 4
-tabulates the rule and makes the full fork check.
+tabulates every constitution and makes the full fork check.
 
 ## Planned
 
-Nothing after chunk 7. SPEC section 10 names no milestone after M4. The
-port of the host to lang-template comes after M4.
+M6 is done (SPEC section 10, chunks 9 to 14). Chunks 10 to 12 add
+compile-time constitutions, a guarded `amend(uint256)` entry and chain
+tests (O3). Chunk 13 adds a `dispute(bytes32,uint256,bytes32)` entry
+that writes no storage (O7). Chunk 14 ports those changes into this kit.
+`HashDom` stays `nonZero` only (O4, SPEC section 9). Nothing is planned
+after M6.
 
-## Gates (2026-10-08)
+## Gates (2026-10-09)
 
-All GREEN on the chunk 7 tree:
+All GREEN on the chunk 14 kit:
 
-- `make` (tcc `-Wall -Werror`).
+- `make build` (tcc `-Wall -Werror`).
 - `make check-clang`.
-- `make test`: `test/parse.sh` 40 cases (15 round trips), `test/evm.sh` 9
-  cases, `test/check.sh` 45 cases, `test/table.sh` 15 cases,
-  `test/eval.sh` 28 cases, including both recursive prelude defs and both
-  laws of F13, `test/build.sh` 36 cases, `test/run.sh` 19 cases, `test/deploy.sh` 13
-  cases, `test/diff.sh` 45 cases and `test/laws.sh` 23 cases, the last
-  four on geth `evm` 1.14.12 (273 cases in all).
+- `make check`: `test/gate.sh` runs the ten test scripts. Their case
+  counts are listed in the README: 412 cases in all, including six
+  differential traces and the amendment and dispute laws. The four
+  chain test files run on geth `evm` 1.14.12. The last line is
+  `gate: 0 failures`.

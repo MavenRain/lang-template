@@ -39,15 +39,18 @@ static int eval_verb(AnchorChecked *checked, char **argv) {
 }
 
 /* The contract of the checked program (src/evm.h): the members, the
- * candidates, and the rows and policy fields of its outcome table. A table
- * refusal returns its code. contract_free frees the rows and the policies. */
+ * candidates, the constitutions, and the rows, policy fields and amend
+ * masks of its outcome table. A table refusal returns its code.
+ * contract_free frees the rows and the policies; the masks stay in the
+ * arena of CHECKED. */
 static int contract_of(AnchorChecked *checked, AnchorContract *contract) {
   memset(contract, 0, sizeof *contract);
   AnchorTable table;
   int status = lang_table(checked, &table);
   if (status != LANG_EXIT_OK)
     return status;
-  AnchorContractRow *rows = calloc(table.nrows + 1, sizeof *rows);
+  size_t nrows = table.constitutions * table.nrows;
+  AnchorContractRow *rows = calloc(nrows + 1, sizeof *rows);
   AnchorContractPolicy *policies = calloc(table.npolicies + 1, sizeof *policies);
   contract->rows = rows;
   contract->policies = policies;
@@ -58,15 +61,17 @@ static int contract_of(AnchorChecked *checked, AnchorContract *contract) {
   contract->members = table.members;
   contract->candidates = table.candidates;
   contract->nrows = table.nrows;
+  contract->constitutions = table.constitutions;
   contract->npolicies = table.npolicies;
-  for (size_t r = 0; r < table.nrows; r++) {
+  contract->amend = table.amend;
+  for (size_t r = 0; r < nrows; r++) {
     rows[r].fate = (unsigned)table.rows[r].fate;
     rows[r].p = table.rows[r].p;
     rows[r].q = table.rows[r].q;
   }
   for (size_t i = 0; i < table.npolicies; i++)
-    if (lang_policy_fields(&table, i, &policies[i].allow, &policies[i].schema) != 0) {
-      fprintf(stderr, "langc: TYPE_INTERNAL: -: policy %lu is not mkPolicy allow or deny with a Nat schema\n",
+    if (lang_policy_fields(&table, i, &policies[i].allow, &policies[i].schema, &policies[i].window) != 0) {
+      fprintf(stderr, "langc: TYPE_INTERNAL: -: policy %lu is not mkPolicy allow or deny with a Nat window and schema\n",
               (unsigned long)i);
       return LANG_EXIT_REFUSED;
     }

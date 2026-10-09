@@ -68,6 +68,29 @@ tally 0 2 : two 1 0
 EOF
 table_is "schelling-ising is two p q at every tally" "$programs/schelling-ising.lang"
 
+# arrow-debreu-amend (SPEC section 10, O3): the amendTo mask of each policy,
+# digit k for constitution k, then the tally rows of each constitution.
+cat > "$out/want.txt" <<EOF
+members 3
+candidates 2
+constitutions 2
+policy 0 $open
+policy 1 mkPolicy deny nonZero blockTime 0 1 (inj 1 of 2 (tuple ()))
+amendTo 0 11
+amendTo 1 10
+constitution 0
+tally 3 0 : one 0
+tally 2 1 : one 0
+tally 1 2 : one 1
+tally 0 3 : one 1
+constitution 1
+tally 3 0 : one 0
+tally 2 1 : one 1
+tally 1 2 : one 1
+tally 0 3 : one 1
+EOF
+table_is "arrow-debreu-amend gives the rows of each constitution" "$programs/arrow-debreu-amend.lang"
+
 # Each mutant gives the same code under table as under check.
 for f in "$mutants"/*.lang; do
   "$langc" check "$f" > /dev/null 2> "$out/check.err"
@@ -110,6 +133,23 @@ if [ "$status" -eq 1 ] && [ "$shape" -eq 1 ]; then
   pass "4096 members are TABLE_LIMIT"
 else
   fail "4096 members: exit $status, stderr: $err"
+fi
+
+# With C constitutions and R tallies, the table has C R rows, at most 4096.
+# 2048 members give R = 2049 and C R = 4098.
+awk '/^def members/ { print "def members : Nat := 2048"; next } { print }' \
+  "$programs/arrow-debreu-amend.lang" > "$out/amend-members-2048.lang"
+"$langc" table "$out/amend-members-2048.lang" > /dev/null 2> "$out/table.err"
+status=$?
+err=$(cat "$out/table.err")
+case $err in
+  "langc: TABLE_LIMIT: candidates: "*"2048 members, 2 candidates and 2 constitutions give more than 4096 rows") shape=1 ;;
+  *) shape=0 ;;
+esac
+if [ "$status" -eq 1 ] && [ "$shape" -eq 1 ]; then
+  pass "2048 members and 2 constitutions are TABLE_LIMIT"
+else
+  fail "2048 members and 2 constitutions: exit $status, stderr: $err"
 fi
 
 if [ "$failures" -ne 0 ]; then

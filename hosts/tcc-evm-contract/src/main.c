@@ -1,6 +1,7 @@
 /* The langc command line. SHARED by the tcc kits.
    Exit 0: ok. Exit 1: the program is refused. Exit 2: usage or IO. */
 #include <errno.h>
+#include <signal.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -148,6 +149,8 @@ static int build_command(Machine *m, const Options *opt, Diag *diag) {
     fclose(code);
     return diag_fail(diag, "IO_WRITE", NULL, "%s: %s", name, strerror(error)) + 2;
   }
+  /* Report broken pipes through IO_WRITE along with other write failures. */
+  signal(SIGPIPE, SIG_IGN);
   unsigned char buffer[1024];
   size_t size = 0;
   int failed = 0;

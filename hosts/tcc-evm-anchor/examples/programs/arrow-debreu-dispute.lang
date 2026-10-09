@@ -1,0 +1,26 @@
+-- Arrow-Debreu with a challenge window (SPEC section 9, O7, chunk 13).
+-- This is examples/programs/arrow-debreu.lang with a window of 100 seconds
+-- in the open policy.  A member may dispute a recorded pair (h, t) while
+-- the tally gives the open policy and the block time is less than t + 100.
+-- The closed policy has the window 0, so no member may dispute under it.
+def members : Nat := 3
+
+-- Candidate 0, the genesis policy: the log admits anchors, and a member
+-- may dispute a pair for 100 seconds.
+def openLog : Policy := mkPolicy allow nonZero blockTime 100 1 flagYes
+
+-- Candidate 1: the log admits no anchor and no dispute.
+def closedLog : Policy := mkPolicy deny nonZero blockTime 0 1 flagYes
+
+def candidates : Candidates := consPolicy openLog (lastPolicy closedLog)
+
+def rule : Tally -> Outcome := fun (t : Tally) =>
+  case natLt (tallyCount 1 t) (tallyCount 0 t) with
+  | 0 (u : prod ()) => one closedLog
+  | 1 (u : prod ()) => one openLog
+
+-- For langc eval: the open policy has a window, so a member may dispute
+-- under it; the closed policy has no window.
+def openDisputes : Flag := windowOpen openLog
+
+def closedDisputes : Flag := windowOpen closedLog

@@ -68,6 +68,8 @@ keccak() {
 lang_in() { printf 'eecdf927%s' "$1"; }
 verify_in() { printf '382262fc%s%064x' "$1" "$2"; }
 cast_in() { printf '738198b4%064x' "$1"; }
+amend_in() { printf '13723792%064x' "$1"; }
+dispute_in() { printf '4db31205%s%064x%s' "$1" "$2" "$3"; }
 
 # program FILE: creation.hex and runtime.hex of FILE (langc build) and its
 # table in table.out. M and K are the member and candidate counts.
@@ -152,9 +154,10 @@ prestate() {
 
 # step SENDER INPUT TIME: call the receiver from SENDER with INPUT at
 # TIMESTAMP TIME, on the storage in state. got gets the line result revert
-# or result OUTPUT, then the line log TOPIC0 TOPIC1 DATA for one log or
-# logs N for more, then the storage after the call. state gets that
-# storage. The awk of the log is the one of test/run.sh.
+# or result OUTPUT, then the line log TOPICS DATA for one log (all of its
+# topics in order, one for Amended, two for Anchored and Disputed) or logs N for
+# more, then the storage after the call. state gets that storage. The awk of the log is
+# the one of test/run.sh.
 step() {
   prestate "$3"
   evm run --prestate "$out/prestate.json" --receiver "0x$receiver" --sender "0x$1" \
@@ -168,10 +171,9 @@ step() {
     esac
     _n=$(awk '/^LOG[0-9]:/ { n++ } END { print n + 0 }' "$out/run.err")
     if [ "$_n" -eq 1 ]; then
-      printf 'log %s %s %s\n' \
-        "$(awk '$1 == "00000000" && NF == 2 { print $2; exit }' "$out/run.err")" \
-        "$(awk '$1 == "00000001" && NF == 2 { print $2; exit }' "$out/run.err")" \
-        "$(awk 'p && /\|/ { for (i = 2; i <= 17; i++) printf "%s", $i } /^LOG2:/ { p = 1 }' "$out/run.err")"
+      printf 'log%s %s\n' \
+        "$(awk '$1 ~ /^0000000[0-3]$/ && NF == 2 { printf " %s", $2 }' "$out/run.err")" \
+        "$(awk 'p && /\|/ { for (i = 2; i <= 17; i++) printf "%s", $i } /^LOG[0-9]:/ { p = 1 }' "$out/run.err")"
     elif [ "$_n" -gt 1 ]; then
       echo "logs $_n"
     fi

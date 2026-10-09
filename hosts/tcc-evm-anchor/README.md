@@ -4,7 +4,7 @@ This kit is a C99 compiler, `langc`, that TinyCC builds. It compiles a
 program for one governed log of hash and time pairs to EVM bytecode for one
 contract. The domain is in `domain/domain.lang`: members, candidates, a
 tally, a constitution, the anchor log and the `anchor`, `verify` and
-`amend` operations. `src/main.c:1-10` lists the verbs.
+`amend` and `dispute` operations. `src/main.c:1-10` lists the verbs.
 
 The kit is a faithful port of the anchor-lang compiler. The sections
 "Origin" and "Renames" tell what changed.
@@ -36,7 +36,7 @@ as `langc: CODE: DEF: message`.
 - `domain/domain.lang`: the prelude. `gen/embed.c` writes it as C to
   `build/domain.c` (`Makefile:21-23`), and `langc` reads no prelude file
   at run time (`src/prelude.h:1-2`).
-- `examples/programs/`: 3 programs. `examples/mutants/`: 10 programs with
+- `examples/programs/`: 5 programs. `examples/mutants/`: 14 programs with
   one defect each.
 - `test/`: 10 test files, `test/evmchain.sh` (sourced by the chain tests),
   `test/evmtool.c`, `test/parsetool.c`, `test/parser-arms.lang` and
@@ -53,22 +53,22 @@ prints its own counts. Then it scans the kit for an em-dash or an en-dash.
 The last line is `gate: N failures`, and the gate exits 1 when N is more
 than 0.
 
-The ok counts at the port (2026-10-08) are the same as anchor-lang at
-`248705e`:
+The ok counts after the M6 refresh (2026-10-09) are the same as
+anchor-lang chunk 14:
 
 | Test file | ok |
 | --- | --- |
-| `test/parse.sh` | 40 |
+| `test/parse.sh` | 46 |
 | `test/evm.sh` | 9 |
-| `test/check.sh` | 45 |
-| `test/table.sh` | 15 |
-| `test/eval.sh` | 28 |
-| `test/build.sh` | 36 |
-| `test/run.sh` | 19 |
-| `test/deploy.sh` | 13 |
-| `test/diff.sh` | 45 |
-| `test/laws.sh` | 23 |
-| total | 273 |
+| `test/check.sh` | 53 |
+| `test/table.sh` | 21 |
+| `test/eval.sh` | 36 |
+| `test/build.sh` | 54 |
+| `test/run.sh` | 55 |
+| `test/deploy.sh` | 17 |
+| `test/diff.sh` | 81 |
+| `test/laws.sh` | 40 |
+| total | 412 |
 
 ## Tools
 
@@ -82,16 +82,23 @@ The ok counts at the port (2026-10-08) are the same as anchor-lang at
 
 ## Origin
 
-This kit is a port of anchor-lang at commit `248705e` (the `src`, `test`,
+The initial kit was a port of anchor-lang at commit `248705e` (the `src`, `test`,
 `tools`, `prelude` and `examples` trees, `formers/tcc-evm.md` and
 `probe/CAPABILITY.md`). The anchor-lang checker and front end came from
 escrowc, at escrow-lang commits `8351635` and `cfe211b`. This note is the
 only place in the kit that names that origin. The other anchor-lang docs
 are not in the kit.
 
+M6 refresh (2026-10-09): the 50 mapped compiler, prelude, example and test
+files match anchor-lang at `cae26a1`, with the same renames below. The
+source repository's `tools/port.py` checks this mapping. It preserves
+kit-owned files, including this README and `docs/CAPABILITY.md`, which
+are maintained separately. The refresh adds amendment and dispute
+examples, guarded EVM entries and their chain tests.
+
 ## Renames
 
-The port copied each file from `248705e` and changed only the names below.
+The initial port copied each file from `248705e` and changed only the names below.
 The line count of each file did not change, so each cite keeps its line
 number. The domain word "anchor" (the `anchor` entry, the `Anchored` log,
 `AnchorLog`) did not change.
@@ -143,10 +150,8 @@ The USER ruled the host name, the faithful port, the scan excludes
 - Silent skips: `test/run.sh:29-31`, `test/deploy.sh:10-12`,
   `test/diff.sh:13-15` and `test/laws.sh:11` exit 0 with no cases when
   `evm` is not on PATH. Then the gate shows 0 failures, and only the ok
-  counts of those 4 files go down (100 of the 273 cases).
+  counts of those 4 files go down (193 of the 412 cases).
 - The host matrix in `formers/FORMERS.md` of lang-template has no column
   for this kit, as for tcc-evm-contract and tcc-evm-dao.
 - The source comments and `docs/CAPABILITY.md` cite sections of the
   anchor-lang SPEC.md, which is not in the kit.
-- The root files of lang-template (`bin/new-lang.sh`, `Makefile`,
-  `README.md` and `tests/test_tools.py`) do not register this kit yet.

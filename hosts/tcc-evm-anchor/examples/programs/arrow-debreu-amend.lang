@@ -1,0 +1,40 @@
+-- Arrow-Debreu with one amendment (SPEC section 10, O3, chunk 10).  This
+-- is examples/programs/arrow-debreu.lang with constitution 1: it opens the
+-- log only on a unanimous tally.  `amendTo` lets the open policy move to
+-- both constitutions and the closed policy only to constitution 0.  No
+-- `AnchorDAO` value can be built in a program: `AnchorLog` is a core name
+-- with no literal (SPEC note P1).
+def members : Nat := 3
+
+-- Candidate 0, the genesis policy: the log admits anchors.
+def openLog : Policy := mkPolicy allow nonZero blockTime 0 1 flagYes
+
+-- Candidate 1: the log admits no anchor.
+def closedLog : Policy := mkPolicy deny nonZero blockTime 0 1 flagYes
+
+def candidates : Candidates := consPolicy openLog (lastPolicy closedLog)
+
+def rule : Tally -> Outcome := fun (t : Tally) =>
+  case natLt (tallyCount 1 t) (tallyCount 0 t) with
+  | 0 (u : prod ()) => one closedLog
+  | 1 (u : prod ()) => one openLog
+
+-- Constitution 1: the open policy only when all three members vote 0.
+def unanimous : Tally -> Outcome := fun (t : Tally) =>
+  case natEq (tallyCount 0 t) 3 with
+  | 0 (u : prod ()) => one closedLog
+  | 1 (u : prod ()) => one openLog
+
+def amendments : Constitutions := lastConstitution (constitutionOf unanimous)
+
+-- amendTo p k: the policy p may move to constitution k.
+def amendTo : Policy -> Nat -> Flag := fun (p : Policy) (k : Nat) =>
+  case verdictFlag (policyAdmit p) with
+  | 0 (u : prod ()) => natEq k 0
+  | 1 (u : prod ()) => flagYes
+
+-- For langc eval: constitution 1 at the profile of three ballots of 0,
+-- and amendTo of the closed policy at constitution 1.
+def unanimousOpen : Outcome := constitutionOf unanimous (withBallot 0 (withBallot 0 (withBallot 0 noBallots)))
+
+def closedToOne : Flag := amendTo closedLog 1

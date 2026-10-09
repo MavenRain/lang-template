@@ -16,14 +16,14 @@ enum {
 
 typedef enum {
   OP_STOP = 0x00, OP_ADD = 0x01, OP_MUL = 0x02, OP_SUB = 0x03, OP_LT = 0x10,
-  OP_GT = 0x11, OP_EQ = 0x14, OP_ISZERO = 0x15, OP_SHR = 0x1c, OP_SHA3 = 0x20,
+  OP_GT = 0x11, OP_EQ = 0x14, OP_ISZERO = 0x15, OP_AND = 0x16, OP_SHR = 0x1c, OP_SHA3 = 0x20,
   OP_CALLER = 0x33, OP_CALLVALUE = 0x34, OP_CALLDATALOAD = 0x35,
   OP_CALLDATASIZE = 0x36, OP_CODESIZE = 0x38, OP_CODECOPY = 0x39,
   OP_TIMESTAMP = 0x42,   OP_POP = 0x50, OP_MLOAD = 0x51, OP_MSTORE = 0x52, OP_SLOAD = 0x54,
   OP_SSTORE = 0x55, OP_JUMP = 0x56, OP_JUMPI = 0x57, OP_JUMPDEST = 0x5b,
   OP_PUSH0 = 0x5f, OP_PUSH1 = 0x60, OP_PUSH2 = 0x61, OP_PUSH4 = 0x63,
   OP_DUP1 = 0x80, OP_DUP2 = 0x81, OP_DUP3 = 0x82, OP_DUP4 = 0x83, OP_DUP5 = 0x84,
-  OP_SWAP1 = 0x90, OP_SWAP2 = 0x91, OP_SWAP3 = 0x92, OP_SWAP4 = 0x93, OP_LOG2 = 0xa2,
+  OP_SWAP1 = 0x90, OP_SWAP2 = 0x91, OP_SWAP3 = 0x92, OP_SWAP4 = 0x93, OP_LOG1 = 0xa1, OP_LOG2 = 0xa2,
   OP_RETURN = 0xf3, OP_REVERT = 0xfd
 } EvmOp;
 
@@ -94,20 +94,24 @@ typedef struct {
 } AnchorContractRow;
 
 /* The fields of a policy that a guard reads: hashDom and clock have one
- * value (O4, O1), forkFreeze is forced (O2) and no entry reads the window (O7). */
+ * value (O4, O1) and forkFreeze is forced (O2). Only dispute reads the
+ * window (O7). */
 typedef struct {
   int allow;                  /* 1 allow, 0 deny */
   unsigned long long schema;
+  unsigned long long window;  /* dispute(h, t, note) runs while TIMESTAMP < t + window */
 } AnchorContractPolicy;
 
 /* The anchor contract of SPEC section 7 with its outcome table. */
 typedef struct {
   unsigned members;   /* n >= 1, one address per member position (O5) */
   size_t candidates;  /* K >= 1, so a ballot is 0 to K - 1 */
-  size_t nrows;       /* C(n + K - 1, K - 1), one row for each tally, in the order of langc table */
-  const AnchorContractRow *rows;
+  size_t nrows;       /* R = C(n + K - 1, K - 1), one row for each tally, in the order of langc table */
+  size_t constitutions; /* C >= 1 (O3): rule, then the constitutions of amendments */
+  const AnchorContractRow *rows; /* C R rows: the R rows of constitution c start at rows + c R */
   size_t npolicies;   /* the candidates, then each other policy of an outcome */
   const AnchorContractPolicy *policies;
+  const unsigned char *amend; /* C > 1: one mask for each policy, bit k set when amendTo p k is yes; else NULL */
 } AnchorContract;
 
 /* Writes lowercase hex, no 0x, one trailing newline. Returns 0, or nonzero

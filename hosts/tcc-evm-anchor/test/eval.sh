@@ -58,6 +58,10 @@ eval_is arrow-impossibility candidates "consPolicy ($open) (lastPolicy ($closed)
 eval_is arrow-impossibility rule "fun ($t : Tally) => none"
 eval_is arrow-impossibility flagYes 'inj 1 of 2 (tuple ())'
 eval_is arrow-debreu closedLog "$closed"
+eval_is arrow-debreu-amend unanimousOpen "one ($open)"
+eval_is arrow-debreu-amend closedToOne 'inj 0 of 2 (tuple ())'
+eval_is arrow-debreu-dispute openDisputes 'inj 1 of 2 (tuple ())'
+eval_is arrow-debreu-dispute closedDisputes 'inj 0 of 2 (tuple ())'
 eval_is arrow-debreu rule "fun ($t : Tally) => case natLt ($(count 1)) ($(count 0)) with | $(leg 0 "one ($closed)") | $(leg 1 "one ($open)")"
 eval_is schelling-ising schemaTwo "$wide"
 eval_is schelling-ising rule "fun ($t : Tally) => case natLt ($(count 0)) ($(count 1)) with | $(leg 0 "two ($open) ($wide)") | $(leg 1 "two ($wide) ($open)")"

@@ -28,7 +28,9 @@ for file in domain/domain.lang test/parser-arms.lang examples/programs/arrow-imp
     examples/programs/arrow-debreu.lang examples/programs/schelling-ising.lang examples/mutants/fork-unfrozen.lang \
     examples/mutants/data-decl.lang examples/mutants/rec-def.lang examples/mutants/prelude-name.lang \
     examples/mutants/core-name.lang examples/mutants/hash-projection.lang examples/mutants/log-match.lang \
-    examples/mutants/rule-type.lang examples/mutants/cong-type.lang examples/mutants/transport-motive.lang; do
+    examples/mutants/rule-type.lang examples/mutants/cong-type.lang examples/mutants/transport-motive.lang \
+    examples/programs/arrow-debreu-amend.lang examples/programs/arrow-debreu-dispute.lang examples/mutants/amend-no-to.lang examples/mutants/amend-to-only.lang \
+    examples/mutants/amend-limit.lang examples/mutants/amend-fork-unfrozen.lang; do
   name=$(basename "$file" .lang)
   "$tool" "$root/$file" > "$out/$name.1" 2> "$out/$name.err"
   first=$?

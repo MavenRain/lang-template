@@ -16,7 +16,8 @@ enum {
   CHECK_FUEL = 1 << 24,  /* evaluation steps of one declaration or of the fork check */
   CHECK_DEPTH = 4096,    /* nested eval, apply, conv, quote, check and infer calls; tcc on an 8 MB stack crashed between 12288 and 16384 (10-07) */
   SINK_BYTES = 8192,     /* the allocations after a MEMORY error land here */
-  TABLE_LIMIT = 4096     /* tallies of one table (SPEC section 7); my choice, not ruled */
+  TABLE_LIMIT = 4096,    /* tallies of one table (SPEC section 7); my choice, not ruled */
+  AMEND_LIMIT = 8        /* constitutions of one program (SPEC section 7); my choice, not ruled */
 };
 
 typedef struct Value Value;
@@ -101,6 +102,9 @@ struct AnchorChecked {
   Loc loc;
   Global *globals;  /* newest first */
   unsigned members;
+  const char *fork_def;   /* rule or amendments: the def of the symbolic fork check */
+  size_t constitutions;   /* C: rule, then the constitutions of amendments (O3) */
+  Value **amends;         /* constitutions 1 to C - 1 */
   Value bad;
   Ast bad_ast;
   union { long double ld; void *p; unsigned long long u; unsigned char bytes[SINK_BYTES]; } sink;
@@ -1403,7 +1407,8 @@ static void fork_arms(C *c, Value *v, const Frame *f, int lvl, const char *which
   }
 }
 
-/* V, an outcome of rule under its binder t, has no two p q with a side
+/* V, an outcome of rule under its binder t (or of a constitution of
+ * amendments under its binder x; c->fork_def names it), has no two p q with a side
  * that is not frozen. When WHICH names a policy side, V is its freeze
  * flag instead. Explore stuck case/match arms in both outcomes and flags,
  * including the frames after each branch. An unresolved leaf is refused. */
@@ -1426,7 +1431,8 @@ static void forks(C *c, Value *v, int lvl, const char *which) {
       forks(c, apply(c, freeze, v->args[1]), lvl, "q");
     }
     if (v->kind == V_NEU && branch == NULL)
-      fail(c, "REFUSE_FORK", c->loc, "an outcome of rule is stuck with no case or match, so its fork is not visible");
+      fail(c, "REFUSE_FORK", c->loc, "an outcome of %s is stuck with no case or match, so its fork is not visible",
+           c->fork_def);
   }
   if (branch != NULL)
     fork_arms(c, v, branch, lvl, which);
@@ -1449,7 +1455,73 @@ static void program_ok(C *c) {
   if (rule == NULL)
     return;
   c->fuel = CHECK_FUEL;
+  c->fork_def = "rule";
   forks(c, apply(c, rule->value, mk_var(c, 0, "t")), 1, NULL);
+}
+
+static int is_ctor(const Value *v, const Global *g, size_t nargs);
+
+/* The program def NAME, or NULL: a prelude name does not count. */
+static Global *program_def(const C *c, const char *name) {
+  Global *g = find_global(c, name);
+  return g != NULL && !g->prelude ? g : NULL;
+}
+
+/* SPEC section 2 (O3; my choices 1 to 3): amendments and amendTo come
+ * together or not at all, typed Constitutions and Policy -> Nat -> Flag.
+ * amendments holds constitutions 1 to C - 1, C <= AMEND_LIMIT, and each
+ * one has the fork check of rule under its binder x. */
+static void amend_ok(C *c) {
+  Global *list = program_def(c, "amendments");
+  Global *to = program_def(c, "amendTo");
+  c->constitutions = 1;
+  if (list == NULL && to == NULL)
+    return;
+  if (list == NULL || to == NULL) {
+    Global *g = list != NULL ? list : to;
+    c->def = span_of(g->name);
+    fail(c, "REFUSE_AMEND", g->decl->loc, "%s", list != NULL ? "amendments has no amendTo" : "amendTo has no amendments");
+    return;
+  }
+  Global *family = find_global(c, "Constitutions");
+  Global *policy = find_global(c, "Policy");
+  Global *flag = find_global(c, "Flag");
+  Global *cons = find_global(c, "consConstitution");
+  Global *last = find_global(c, "lastConstitution");
+  if (family == NULL || policy == NULL || flag == NULL || cons == NULL || last == NULL) {
+    fail(c, "TYPE_INTERNAL", c->loc, "the prelude lacks Constitutions, Policy or Flag");
+    return;
+  }
+  required(c, "amendments", family->value);
+  required(c, "amendTo", mk_two(c, V_PI, policy->value, mk_two(c, V_PI, mk(c, V_NAT_TYPE), flag->value)));
+  if (c->failed)
+    return;
+  c->def = span_of("amendments");
+  c->loc = list->decl->loc;
+  size_t n = 0;  /* the constitutions before the last one */
+  const Value *v = list->value;
+  for (; is_ctor(v, cons, 2) && n + 1 < AMEND_LIMIT; v = v->args[1])
+    n++;
+  if (n + 1 == AMEND_LIMIT) {
+    fail(c, "AMEND_LIMIT", c->loc, "rule and amendments give more than %d constitutions", AMEND_LIMIT);
+    return;
+  }
+  if (!is_ctor(v, last, 1)) {
+    fail(c, "TABLE_STUCK", c->loc, "amendments does not reduce to a list of constitutions");
+    return;
+  }
+  Value **fs = alloc(c, (n + 1) * sizeof *fs);
+  v = list->value;
+  for (size_t i = 0; i < n; i++, v = v->args[1])
+    fs[i] = v->args[0];
+  fs[n] = v->args[0];
+  c->fork_def = "amendments";
+  for (size_t i = 0; i <= n && !c->failed; i++) {
+    c->fuel = CHECK_FUEL;
+    forks(c, apply(c, fs[i], mk_var(c, 0, "x")), 1, NULL);
+  }
+  c->amends = fs;
+  c->constitutions = n + 2;
 }
 
 int lang_check(Arena *arena, const Program *prelude, const Program *program, AnchorChecked **checked,
@@ -1480,6 +1552,8 @@ int lang_check(Arena *arena, const Program *prelude, const Program *program, Anc
     check_decl(c, program, i, 0);
   if (!c->failed)
     program_ok(c);
+  if (!c->failed)
+    amend_ok(c);
   return c->failed ? LANG_EXIT_REFUSED : LANG_EXIT_OK;
 }
 
@@ -1634,24 +1708,19 @@ static void fork_sides(C *c, Value *o, const char *at) {
   }
 }
 
-/* The row of the tally COUNTS: rule at mkTally of the count function,
- * normalized to none, one p or two p q with closed policies. */
-static AnchorRow tally_row(C *c, const unsigned *counts, size_t k, Value **policies, size_t *n) {
+/* The row of the outcome O of WHAT at the tally AT, normalized to none,
+ * one p or two p q with closed policies. */
+static AnchorRow outcome_row(C *c, Value *o, const char *what, const char *at, Value **policies, size_t *n) {
   static const char *const fates[3] = {"none", "one", "two"};
   AnchorRow row = {LANG_FATE_NONE, 0, 0};
-  char at[256];
-  tally_text(at, sizeof at, counts, k);
-  c->fuel = CHECK_FUEL;
-  Value *tally = apply(c, find_global(c, "mkTally")->value, count_fn(c, counts, k));
-  Value *o = apply(c, find_global(c, "rule")->value, tally);
   if (c->failed)
     return row;
   size_t fate = 0;  /* also the number of policies of the outcome */
   while (fate < 3 && !is_ctor(o, find_global(c, fates[fate]), fate))
     fate++;
   if (fate == 3 || !closed(o)) {
-    fail(c, "TABLE_STUCK", c->loc, "the outcome of rule at tally %s is not none, one p or two p q of closed policies",
-         at);
+    fail(c, "TABLE_STUCK", c->loc, "the outcome of %s at tally %s is not none, one p or two p q of closed policies",
+         what, at);
     return row;
   }
   if (fate == 2)
@@ -1660,6 +1729,60 @@ static AnchorRow tally_row(C *c, const unsigned *counts, size_t k, Value **polic
   row.p = fate >= 1 ? policy_number(c, policies, n, o->args[0]) : 0;
   row.q = fate == 2 ? policy_number(c, policies, n, o->args[1]) : 0;
   return row;
+}
+
+/* The row of the tally COUNTS: rule at mkTally of the count function. */
+static AnchorRow tally_row(C *c, const unsigned *counts, size_t k, Value **policies, size_t *n) {
+  char at[256];
+  tally_text(at, sizeof at, counts, k);
+  c->fuel = CHECK_FUEL;
+  Value *tally = apply(c, find_global(c, "mkTally")->value, count_fn(c, counts, k));
+  return outcome_row(c, apply(c, find_global(c, "rule")->value, tally), "rule", at, policies, n);
+}
+
+/* The sorted profile of the tally COUNTS (O3, my choice 4): counts[0]
+ * ballots of 0 first, then the ballots of 1, and so on. */
+static Value *sorted_profile(C *c, const unsigned *counts, size_t k) {
+  Value *with = find_global(c, "withBallot")->value;
+  Value *x = find_global(c, "noBallots")->value;
+  for (size_t j = k; j > 0; j--)
+    for (unsigned b = 0; b < counts[j - 1] && !c->failed; b++)
+      x = apply(c, apply(c, with, mk_nat(c, j - 1)), x);
+  return x;
+}
+
+/* The row of constitution B >= 1 at the tally COUNTS: its outcome at the
+ * sorted profile of COUNTS. */
+static AnchorRow profile_row(C *c, size_t b, const unsigned *counts, size_t k, Value **policies, size_t *n) {
+  char at[256];
+  char what[64];
+  tally_text(at, sizeof at, counts, k);
+  snprintf(what, sizeof what, "constitution %lu", (unsigned long)b);
+  c->fuel = CHECK_FUEL;
+  Value *x = sorted_profile(c, counts, k);
+  return outcome_row(c, apply(c, c->amends[b - 1], x), what, at, policies, n);
+}
+
+/* One mask for each of the N policies (O3, my choice 5): bit B is set when
+ * amendTo p B is flagYes. NULL after TABLE_STUCK, TYPE_FUEL or MEMORY. */
+static unsigned char *amend_masks(C *c, Value **policies, size_t n) {
+  Global *to = find_global(c, "amendTo");
+  c->def = span_of("amendTo");
+  c->loc = to->decl->loc;
+  unsigned char *masks = table_alloc(c, n, sizeof *masks);
+  for (size_t i = 0; i < n && !c->failed; i++) {
+    masks[i] = 0;
+    for (size_t b = 0; b < c->constitutions && !c->failed; b++) {
+      c->fuel = CHECK_FUEL;
+      Value *flag = apply(c, apply(c, to->value, policies[i]), mk_nat(c, b));
+      int yes = flag->kind == V_INJ && flag->nat == 1;
+      if (!c->failed && (flag->kind != V_INJ || !closed(flag)))
+        fail(c, "TABLE_STUCK", c->loc, "amendTo of policy %lu at constitution %lu does not normalize to a closed flag",
+             (unsigned long)i, (unsigned long)b);
+      masks[i] = (unsigned char)(masks[i] | (yes ? 1u << b : 0u));
+    }
+  }
+  return c->failed ? NULL : masks;
 }
 
 int lang_table(AnchorChecked *c, AnchorTable *t) {
@@ -1671,16 +1794,20 @@ int lang_table(AnchorChecked *c, AnchorTable *t) {
   size_t k = 0;
   Value **cands = candidate_policies(c, &k);
   size_t total = cands == NULL ? 0 : tally_total(c->members, k);
+  size_t blocks = c->constitutions;  /* C: one block of R rows for each constitution */
   if (total > TABLE_LIMIT)
     fail(c, "TABLE_LIMIT", c->loc, "%u members and %lu candidates give more than %d tallies", c->members,
          (unsigned long)k, TABLE_LIMIT);
+  else if (total * blocks > TABLE_LIMIT)
+    fail(c, "TABLE_LIMIT", c->loc, "%u members, %lu candidates and %lu constitutions give more than %d rows",
+         c->members, (unsigned long)k, (unsigned long)blocks, TABLE_LIMIT);
   if (c->failed)
     return LANG_EXIT_REFUSED;
   c->def = span_of("rule");
   c->loc = find_global(c, "rule")->decl->loc;
   unsigned *counts = table_alloc(c, total * k, sizeof *counts);
-  AnchorRow *rows = table_alloc(c, total, sizeof *rows);
-  Value **policies = table_alloc(c, k + 2 * total, sizeof *policies);
+  AnchorRow *rows = table_alloc(c, total * blocks, sizeof *rows);
+  Value **policies = table_alloc(c, k + 2 * total * blocks, sizeof *policies);
   if (c->failed)
     return LANG_EXIT_REFUSED;
   memcpy(policies, cands, k * sizeof *policies);
@@ -1695,6 +1822,14 @@ int lang_table(AnchorChecked *c, AnchorTable *t) {
     }
     rows[r] = tally_row(c, row, k, policies, &n);
   }
+  if (blocks > 1) {
+    c->def = span_of("amendments");
+    c->loc = find_global(c, "amendments")->decl->loc;
+  }
+  for (size_t b = 1; b < blocks && !c->failed; b++)
+    for (size_t r = 0; r < total && !c->failed; r++)
+      rows[b * total + r] = profile_row(c, b, counts + r * k, k, policies, &n);
+  const unsigned char *masks = blocks > 1 ? amend_masks(c, policies, n) : NULL;
   const Ast **forms = table_alloc(c, n, sizeof *forms);
   for (size_t i = 0; i < n && !c->failed; i++)
     forms[i] = quote(c, policies[i], 0);
@@ -1704,6 +1839,8 @@ int lang_table(AnchorChecked *c, AnchorTable *t) {
   t->candidates = k;
   t->npolicies = n;
   t->policies = forms;
+  t->constitutions = blocks;
+  t->amend = masks;
   t->nrows = total;
   t->counts = counts;
   t->rows = rows;
@@ -1717,7 +1854,8 @@ static int policy_var(const Ast *a, const char *name) {
   return var && strcmp(a->u.name, name) == 0;
 }
 
-int lang_policy_fields(const AnchorTable *t, size_t i, int *allow, unsigned long long *schema) {
+int lang_policy_fields(const AnchorTable *t, size_t i, int *allow, unsigned long long *schema,
+                         unsigned long long *window) {
   const Ast *args[6] = {NULL, NULL, NULL, NULL, NULL, NULL};
   const Ast *head = i < t->npolicies ? t->policies[i] : NULL;
   size_t n = 6;
@@ -1727,9 +1865,11 @@ int lang_policy_fields(const AnchorTable *t, size_t i, int *allow, unsigned long
     head = head->u.app.fun;
   }
   int nat = args[4] != NULL && args[4]->kind == AST_NAT;
+  int window_nat = args[3] != NULL && args[3]->kind == AST_NAT;
   *allow = policy_var(args[0], "allow");
   *schema = nat ? args[4]->u.nat : 0;
-  int fields = nat && (*allow || policy_var(args[0], "deny"));
+  *window = window_nat ? args[3]->u.nat : 0;
+  int fields = nat && window_nat && (*allow || policy_var(args[0], "deny"));
   return n == 0 && policy_var(head, "mkPolicy") && fields ? 0 : 1;
 }
 
@@ -1742,39 +1882,65 @@ static void print_tally(FILE *out, const AnchorTable *t, size_t r) {
     fprintf(out, " %u", t->counts[r * t->candidates + j]);
 }
 
-void lang_print_table(FILE *out, const AnchorTable *t) {
+/* "members N", "candidates K", then "constitutions C" when C > 1. */
+static void print_head(FILE *out, const AnchorTable *t) {
   fprintf(out, "members %u\ncandidates %lu\n", t->members, (unsigned long)t->candidates);
+  if (t->constitutions > 1)
+    fprintf(out, "constitutions %lu\n", (unsigned long)t->constitutions);
+}
+
+/* "constitution B" before block B when C > 1. */
+static void print_block(FILE *out, const AnchorTable *t, size_t b) {
+  if (t->constitutions > 1)
+    fprintf(out, "constitution %lu\n", (unsigned long)b);
+}
+
+void lang_print_table(FILE *out, const AnchorTable *t) {
+  print_head(out, t);
   for (size_t i = 0; i < t->npolicies; i++) {
     fprintf(out, "policy %lu ", (unsigned long)i);
     lang_print_term(out, t->policies[i]);
     fputc('\n', out);
   }
-  for (size_t r = 0; r < t->nrows; r++) {
-    const AnchorRow *row = &t->rows[r];
-    print_tally(out, t, r);
-    fprintf(out, " : %s", FATES[row->fate]);
-    if (row->fate != LANG_FATE_NONE)
-      fprintf(out, " %lu", (unsigned long)row->p);
-    if (row->fate == LANG_FATE_TWO)
-      fprintf(out, " %lu", (unsigned long)row->q);
+  for (size_t i = 0; t->amend != NULL && i < t->npolicies; i++) {
+    fprintf(out, "amendTo %lu ", (unsigned long)i);
+    for (size_t b = 0; b < t->constitutions; b++)
+      fputc(((t->amend[i] >> b) & 1u) != 0 ? '1' : '0', out);
     fputc('\n', out);
+  }
+  for (size_t b = 0; b < t->constitutions; b++) {
+    print_block(out, t, b);
+    for (size_t r = 0; r < t->nrows; r++) {
+      const AnchorRow *row = &t->rows[b * t->nrows + r];
+      print_tally(out, t, r);
+      fprintf(out, " : %s", FATES[row->fate]);
+      if (row->fate != LANG_FATE_NONE)
+        fprintf(out, " %lu", (unsigned long)row->p);
+      if (row->fate == LANG_FATE_TWO)
+        fprintf(out, " %lu", (unsigned long)row->q);
+      fputc('\n', out);
+    }
   }
 }
 
 /* ---- the fate report and eval (chunk 4b) ---- */
 
 void lang_print_report(FILE *out, const AnchorTable *t) {
-  fprintf(out, "members %u\ncandidates %lu\n", t->members, (unsigned long)t->candidates);
-  for (size_t f = 0; f < 3; f++) {
-    size_t n = 0;
-    for (size_t r = 0; r < t->nrows; r++)
-      n += t->rows[r].fate == (AnchorFate)f;
-    fprintf(out, "fate %s %lu\n", FATES[f], (unsigned long)n);
-    for (size_t r = 0; r < t->nrows; r++)
-      if (t->rows[r].fate == (AnchorFate)f) {
-        print_tally(out, t, r);
-        fputc('\n', out);
-      }
+  print_head(out, t);
+  for (size_t b = 0; b < t->constitutions; b++) {
+    const AnchorRow *rows = t->rows + b * t->nrows;
+    print_block(out, t, b);
+    for (size_t f = 0; f < 3; f++) {
+      size_t n = 0;
+      for (size_t r = 0; r < t->nrows; r++)
+        n += rows[r].fate == (AnchorFate)f;
+      fprintf(out, "fate %s %lu\n", FATES[f], (unsigned long)n);
+      for (size_t r = 0; r < t->nrows; r++)
+        if (rows[r].fate == (AnchorFate)f) {
+          print_tally(out, t, r);
+          fputc('\n', out);
+        }
+    }
   }
 }
 

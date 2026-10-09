@@ -217,12 +217,15 @@ Storage layout:
 Output:
 
 - One line of lowercase hex, with no `0x` and a newline at the end. It goes to stdout, or to OUT with `-o OUT`.
+- `--runtime` writes only the runtime bytes, even when the initialization code exceeds the creation size limit.
 - The output goes into a temporary buffer first. A refused build writes nothing on stdout, keeps an existing OUT and makes no new OUT.
 - Exit 0: the build is correct. Exit 1: `langc: REFUSE_LOWER: ...` or another refusal. Exit 2: `langc: IO_WRITE: -: stdout: ...` when a write fails.
 
 REFUSE_LOWER refuses a state that has no storage form in slice K4a: an Option field, a Prod field, a List of a type that is not a word, a nested List, a Map with a key or a value that is not a word, an `init` with arguments, and a program with no state or no `init`. `langc check` refuses a Map with a List value first (REFUSE_MAP).
 
 `test/build.sh` builds `examples/contract.lang`, `examples/map.lang` and `examples/storage.lang`, runs each code with `evm run --create --dump` and compares each storage slot with `langc eval PROG init`. `build/slottool HEX` computes the keccak256 slots. The script also runs the rows of `test/lower/expect.txt` and the output cases.
+
+`build/buildtool` checks runtime extraction when creation code is oversized and verifies IO_WRITE with exit 2 for a closed stdout pipe.
 
 ## Commands
 

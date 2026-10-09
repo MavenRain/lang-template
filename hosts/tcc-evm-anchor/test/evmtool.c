@@ -78,7 +78,7 @@ int main(int argc, char **argv) {
   size_t npolicies = (size_t)candidates < TOOL_ROWS ? (size_t)candidates : TOOL_ROWS;
   AnchorContractRow *rows = calloc(nrows + 1, sizeof *rows);
   AnchorContractPolicy *policies = calloc(npolicies + 1, sizeof *policies);
-  AnchorContract contract = { (unsigned)members, (size_t)candidates, nrows, rows, npolicies, policies };
+  AnchorContract contract = { (unsigned)members, (size_t)candidates, nrows, 1, rows, npolicies, policies, NULL };
   int status = lang_evm_write(&contract, part, stdout, stderr) == 0 ? 0 : 1;
   free(rows);
   free(policies);

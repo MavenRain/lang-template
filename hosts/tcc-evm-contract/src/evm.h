@@ -16,7 +16,8 @@ typedef enum { EVM_BUILD_OK, EVM_BUILD_SIZE, EVM_BUILD_OOM, EVM_BUILD_WRITE } Ev
    storage words: bytes 0 to 31 the slot, bytes 32 to 63 the value, both
    big-endian. The creation code stores each pair with a value that is not
    zero (PUSH value, PUSH slot, SSTORE), then returns the runtime code. The
-   K4a runtime code is PUSH0 PUSH0 REVERT. */
+   K4a runtime code is PUSH0 PUSH0 REVERT. TARGET_PART_RUNTIME writes only
+   that runtime, without assembling or applying size limits to creation code. */
 EvmBuild evm_build(const unsigned char (*pairs)[64], size_t count, TargetPart part, FILE *out);
 
 #endif
