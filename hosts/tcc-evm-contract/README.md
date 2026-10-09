@@ -257,7 +257,7 @@ The other refusals of `langc build` (exit 1, no output):
 
 `test/build.sh` builds `examples/contract.lang`, `examples/map.lang` and `examples/storage.lang`, runs each code with `evm run --create --dump` and compares each storage slot with `langc eval PROG init`. `build/slottool HEX` computes the keccak256 slots. The script also runs the rows of `test/lower/expect.txt` and the output cases.
 
-`test/dispatch.sh` builds `examples/residuals.lang` and does 16 calls with geth `evm run`: empty call data, a short selector, an unknown selector, a call value (and a control call with no value), `none`, a trap, a caller that is not the owner, short call data, dirty Nat bits, Nat 2^64 - 1, and the storage after an entry. The selectors and the Map slots come from the SHA3 op of `evm`, not from `langc`.
+`test/dispatch.sh` builds `examples/residuals.lang` and does 20 calls with geth `evm run`: empty call data, a short selector, an unknown selector, a call value (and a control call with no value), `none`, a trap, a caller that is not the owner, short call data, dirty Nat bits, Nat 2^64 - 1, dirty Addr bits (bit 160), a dirty Flag word (the value 2), a control call with an Addr and a Flag argument, and the storage after three entries. The selectors and the Map slots come from the SHA3 op of `evm`, not from `langc`.
 
 `build/buildtool` checks the 37-byte runtime of a contract with no entry, the EIP-170 runtime limit in the two output modes, the EVM_SELECTOR refusal (before any output) and IO_WRITE with exit 2 for a closed stdout pipe.
 

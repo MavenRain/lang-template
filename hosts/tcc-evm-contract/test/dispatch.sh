@@ -23,6 +23,7 @@ crash=$(sel 'crash()')
 earn=$(sel 'earn(uint256)')
 file=$(sel 'file(uint64,uint256,uint64)')
 own=$(sel 'own()')
+mark=$(sel 'mark(address,bool)')
 
 # call NAME INPUT WANT [FLAGS...]: the output and the error of `evm run` on one line.
 # With --prestate, evm also writes an INFO log line: the awk filter removes it.
@@ -74,6 +75,11 @@ call file-dirty-k "$file$(w 10000000000000000)$(w 9)$(w 4)" "$revert"
 call file-dirty-j "$file$(w 3)$(w 9)$(w 10000000000000000)" "$revert"
 call file "$file$(w ffffffffffffffff)$(w 9)$(w 4)" ''
 store file-storage "$file$(w ffffffffffffffff)$(w 9)$(w 4)" "$(keccak "$(w ffffffffffffffff)$(w 4)") 09"
+# Dirty Addr and Flag words: bit 160 of the address, the flag value 2. Then the control call.
+call mark-dirty-addr "$mark$(w "1$(w bb | cut -c25-)")$(w 1)" "$revert"
+call mark-dirty-flag "$mark$(w bb)$(w 2)" "$revert"
+call mark "$mark$(w bb)$(w 1)" ''
+store mark-storage "$mark$(w bb)$(w 1)" "$(w 0) bb"
 
 if [ "$fail" -ne 0 ]; then
   echo "dispatch: $fail of $checks checks failed"
