@@ -253,7 +253,7 @@ The other refusals of `langc build` (exit 1, no output):
 
 - `langc: EVM_SIGNATURE: ...`: the signature of an entry is longer than 255 bytes.
 - `langc: EVM_SELECTOR: ...`: two entries have the same 4-byte selector.
-- `langc: EVM_SIZE: ...`: the creation code is longer than the EIP-3860 limit, or the runtime is longer than the EIP-170 limit.
+- `langc: EVM_SIZE: ...`: the creation code is longer than the EIP-3860 limit, the runtime is longer than the EIP-170 limit, or an assembler buffer or table is full. The assembler allows at most 1024 labels and 4096 jump references (`src/asm.h`); these table limits can refuse code below the EIP byte limits.
 
 `test/build.sh` builds `examples/contract.lang`, `examples/map.lang` and `examples/storage.lang`, runs each code with `evm run --create --dump` and compares each storage slot with `langc eval PROG init`. `build/slottool HEX` computes the keccak256 slots. The script also runs the rows of `test/lower/expect.txt` and the output cases.
 
