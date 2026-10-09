@@ -2,6 +2,7 @@
      decl    := 'def' 'rec'? NAME ':' term ':=' term
               | 'axiom' NAME ':' term
               | 'family' NAME group* ':=' ctor ('|' ctor)*
+              | 'event' NAME group*
      ctor    := NAME group*
      group   := '(' NAME+ ':' term ')'
      term    := 'fun' (NAME | group)+ '=>' term
@@ -146,6 +147,7 @@ static int starts_atom(TokKind kind) {
     case TOK_KW_FAMILY:
     case TOK_KW_AXIOM:
     case TOK_KW_STATE:
+    case TOK_KW_EVENT:
       return 0;
   }
   return 0;
@@ -308,6 +310,7 @@ static const Term *parse_atom(Parser *p) {
     case TOK_KW_FAMILY:
     case TOK_KW_AXIOM:
     case TOK_KW_STATE:
+    case TOK_KW_EVENT:
       break;
   }
   fail_at(p, tok, "a term");
@@ -433,6 +436,31 @@ static int parse_family(Parser *p, Decl *d) {
   return 1;
 }
 
+/* `event NAME group*` (slice K4a1): a family declaration with one
+   constructor, the event. The checker adds the constructor to Out. */
+static int parse_event(Parser *p, Decl *d) {
+  size_t cap = 0;
+  Ctor *ctor;
+  bump(p);
+  d->kind = DECL_FAMILY;
+  d->is_rec = 0;
+  d->type = NULL;
+  d->body = NULL;
+  d->params = NULL;
+  d->param_count = 0;
+  d->name = take_name(p, "an event name");
+  if (d->name == NULL) return 0;
+  p->def = d->name;
+  ctor = grow(p, NULL, 0, &cap, sizeof *ctor);
+  if (ctor == NULL) return 0;
+  ctor->name = d->name;
+  ctor->line = d->line;
+  ctor->col = d->col;
+  d->ctors = ctor;
+  d->ctor_count = 1u;
+  return parse_fields(p, 0, &ctor->fields, &ctor->field_count);
+}
+
 static int parse_decl(Parser *p, Decl *d) {
   const Token *tok = cur(p);
   p->def = NULL;
@@ -440,11 +468,13 @@ static int parse_decl(Parser *p, Decl *d) {
   d->line = tok->line;
   d->col = tok->col;
   d->is_state = tok->kind == TOK_KW_STATE;
+  d->is_event = tok->kind == TOK_KW_EVENT;
   switch (tok->kind) {
     case TOK_KW_DEF: return parse_def(p, d);
     case TOK_KW_AXIOM: return parse_axiom(p, d);
     case TOK_KW_FAMILY:
     case TOK_KW_STATE: return parse_family(p, d);
+    case TOK_KW_EVENT: return parse_event(p, d);
     case TOK_EOF:
     case TOK_IDENT:
     case TOK_NAT:
@@ -463,7 +493,7 @@ static int parse_decl(Parser *p, Decl *d) {
     case TOK_KW_SIGMA:
       break;
   }
-  return fail_at(p, tok, "'def', 'axiom', 'family' or 'state'");
+  return fail_at(p, tok, "'def', 'axiom', 'family', 'state' or 'event'");
 }
 
 int parse_source(Arena *arena, const char *source, Origin origin, const TokenList *toks, DeclList *list, Diag *diag) {

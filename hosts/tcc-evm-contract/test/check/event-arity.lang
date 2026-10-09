@@ -1,0 +1,3 @@
+-- An event value needs all of its fields (slice K4a1).
+event Paid (to : Addr) (amount : U256)
+def bad : Out := Paid 0x00000000000000000000000000000000000000bb

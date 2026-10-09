@@ -19,6 +19,7 @@ The TinyCC host kit of retainer-lang. It compiles the contract language to EVM b
 | K3b | `langc run` and call scripts | Done |
 | K3c | History rule: REFUSE_HISTORY_WRITE | Done |
 | K4a0 | Map former (front end) | Done |
+| K4a1 | Named events (front end) | Done |
 | K4 to K5 | See the retainer-lang brief | Planned |
 
 
@@ -68,7 +69,8 @@ family Out := pay (payToken : Addr) (payTo : Addr) (payAmount : U256)
 
 - `Env` gives the time of the call (`now`) and the address of the caller (`caller`).
 - `Out` is one effect of an entry. `pay` sends tokens to an address. `pull` moves tokens from an address. `emit` writes an event.
-- The emit tag is an event index. Slice K4 maps it to a log topic.
+- `emit` stays in slice K4a1. A program can also declare named events (refer to `## Events (slice K4a1)`).
+- Slice K4c writes a LOG only for a named event, thus K4c has no LOG form for `emit`. The project owner rules on `emit` before slice K4c: remove it or refuse it.
 
 The state form:
 
@@ -166,6 +168,36 @@ The exit codes of `langc run`:
 - A Map can be a state field at the top level only. A Map in Option, Prod or List, and a history Map, give REFUSE_STATE.
 - A Map has no ABI type. A definition with a Map argument or a Map result is a helper, not an entry or a view, so `langc run` gives EVAL_ENTRY for a call to it.
 - examples/map.lang has the laws as `refl` definitions and a state with a Map field. test/run/map.script calls it. The run gate runs test/run/NAME.script on examples/NAME.lang when that file exists, else on examples/contract.lang.
+
+## Events (slice K4a1)
+
+An event is a named effect with fields. K4a1 adds it to the front end only (`langc check`, `langc eval` and `langc run`). There is no EVM code for an event yet.
+
+```
+event Opened
+event Paid (to : Addr) (amount : U256)
+```
+
+- Syntax: `event Name (f1 : T1) ... (fn : Tn)`. An event can have no fields. `event` is a reserved word.
+- An event is a constructor of `Out`. `Paid a w` is a value of type `Out`, thus an entry can put it in its `List Out` result. An incorrect number of arguments gives TYPE_ARITY. An argument of an incorrect type gives TYPE_MISMATCH.
+- Field types: Nat, Flag, U256 and Addr (the ABI word types). Another field type gives REFUSE_EVENT. More than 16 fields give REFUSE_EVENT. Two fields of one event with the same name give REFUSE_EVENT.
+- Names: an event name is a core name. A second event with the same name, or a definition with the name of an event, gives REFUSE_NAME (rule R4, `X is an event`). A field name is local to its event. It is not a projection and not a core name, thus two events and a definition can use the same field name.
+- Signature: `Name(t1,...,tn)`, with the ABI type name of each field. Nat, Flag and U256 are `uint256` (one word, as `target_abi_line` in `src/evm.c`). Addr is `address`. K4a1 does not compute the signature. Slice K4c computes it: the LOG topic0 is the keccak256 of the signature. All fields go in the log data and no field is indexed (LOG1). This default is not ruled.
+- Scope: the checker adds the events to `Out` when it checks the `Out` family of the prelude, before all program definitions. Thus a definition can use an event that the program declares after it. A field type cannot use an alias definition of the program, because that definition is not in scope yet. An `event` in `domain/domain.lang` also adds a constructor to `Out`.
+- An event is not a state field: a state field of type `Out` gives REFUSE_STATE. `Out` has no ABI type, thus a definition with an `Out` argument or an `Out` result is a helper, not an entry or a view.
+- Print form: `langc eval` prints an event in the constructor form, for example `Paid 0x00000000000000000000000000000000000000bb 7u`. `langc run` prints each event of a call on a line `  event Name a1 ... an` after the call line. A compound argument is in parentheses.
+
+`test/run/events.script` calls `deposit` of `examples/events.lang` two times. The `langc run` output (`test/run/events.out`) is:
+
+```
+1 deposit ok
+  event Opened
+  event Paid 0x00000000000000000000000000000000000000bb 5u
+2 deposit ok
+  event Opened
+  event Paid 0x00000000000000000000000000000000000000cc 2u
+state makeState 7u
+```
 
 ## Commands
 

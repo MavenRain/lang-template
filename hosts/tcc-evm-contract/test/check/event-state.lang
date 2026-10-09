@@ -1,0 +1,3 @@
+-- An event is a value of Out, so a state field cannot hold one (slice K4a1).
+event Opened
+state State := makeState (last : Out)

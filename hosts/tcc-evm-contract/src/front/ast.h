@@ -64,6 +64,7 @@ typedef struct {
   Origin origin;
   int is_rec;
   int is_state; /* the state form, a family with the keyword state (slice K3a) */
+  int is_event; /* an event declaration, one constructor of Out (slice K4a1) */
   int line;
   int col;
   const char *name;

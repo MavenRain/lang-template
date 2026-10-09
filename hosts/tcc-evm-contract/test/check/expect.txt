@@ -47,3 +47,11 @@ map-value.lang REFUSE_MAP
 map-history.lang REFUSE_STATE
 map-nested.lang REFUSE_STATE
 map-get.lang TYPE_MISMATCH
+event-field.lang REFUSE_EVENT
+event-field-name.lang REFUSE_EVENT
+event-duplicate.lang REFUSE_NAME
+event-def.lang REFUSE_NAME
+event-max.lang REFUSE_EVENT
+event-arity.lang TYPE_ARITY
+event-arg.lang TYPE_MISMATCH
+event-state.lang REFUSE_STATE

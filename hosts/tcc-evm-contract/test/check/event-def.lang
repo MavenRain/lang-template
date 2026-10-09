@@ -1,0 +1,3 @@
+-- A definition cannot have the name of an event (slice K4a1).
+event Opened
+def Opened : Nat := 1

@@ -1389,12 +1389,12 @@ static const char *name_owner(const Checker *c, const char *name) {
       return "a domain family";
   }
   for (i = 0; i < m->ctor_count; i++) {
-    for (j = 0; j < m->ctors[i].field_count; j++) {
+    for (j = 0; !m->ctors[i].event && j < m->ctors[i].field_count; j++) {
       if (strcmp(m->ctors[i].fields[j].name, name) == 0)
         return "a domain field";
     }
     if (strcmp(m->ctors[i].name, name) == 0)
-      return "a domain constructor";
+      return m->ctors[i].event ? "an event" : "a domain constructor";
   }
   i = find_def(m, name);
   if (i == NO_DEF)
@@ -1453,7 +1453,64 @@ static int check_ctor(Checker *c, uint32_t fam, const Ctor *ctor) {
   ci->family = fam;
   ci->fields = fields;
   ci->field_count = (uint32_t)ctor->field_count;
+  ci->event = 0;
   m->ctor_count++;
+  return 1;
+}
+
+/* An event (slice K4a1): a constructor of Out with fields of the ABI word
+   types Nat, Flag, U256 and Addr. The field names are local: they are not
+   projections and not core names. */
+static int check_event(Checker *c, uint32_t fam, const Decl *d) {
+  Machine *m = c->m;
+  const Ctor *ctor = &d->ctors[0];
+  FieldInfo *fields = arena_alloc(m->arena, (ctor->field_count + 1u) * sizeof *fields);
+  CtorInfo *ci = &m->ctors[m->ctor_count];
+  size_t j;
+  m->def = d->name;
+  if (fields == NULL)
+    return FAIL(c, "OOM", "out of memory");
+  if (!name_free(c, d->name))
+    return 0;
+  if (ctor->field_count > ENTRY_PARAMS_MAX)
+    return FAIL(c, "REFUSE_EVENT", "the event %s has %u fields, the limit is %u", d->name, (unsigned)ctor->field_count, ENTRY_PARAMS_MAX);
+  for (j = 0; j < ctor->field_count; j++) {
+    uint64_t level = 0;
+    const Core *t = check_type(c, ctor->fields[j].type, &level);
+    const Value *v = t == NULL ? NULL : here(c, t);
+    if (v == NULL)
+      return 0;
+    if (!val_is(v, OP_NAT) && !val_is(v, OP_FLAG) && !val_is(v, OP_U256) && !val_is(v, OP_ADDR))
+      return FAIL(c, "REFUSE_EVENT", "the event field %s must have an ABI word type: Nat, Flag, U256 or Addr, found %s", ctor->fields[j].name, show(c, v));
+    for (size_t k = 0; k < j; k++)
+      if (strcmp(ctor->fields[j].name, ctor->fields[k].name) == 0)
+        return FAIL(c, "REFUSE_EVENT", "%s is already a field of the event %s", ctor->fields[j].name, d->name);
+    fields[j].name = ctor->fields[j].name;
+    fields[j].type = t;
+    fields[j].recursive = 0;
+    fields[j].history = 0;
+  }
+  ci->name = d->name;
+  ci->family = fam;
+  ci->fields = fields;
+  ci->field_count = (uint32_t)ctor->field_count;
+  ci->event = 1;
+  m->ctor_count++;
+  m->families[fam].ctor_count++;
+  return 1;
+}
+
+/* The events of the program join the family Out of the contract prelude, in
+   the order of the program (slice K4a1). Thus a definition can use an event
+   that the program declares after it. */
+static int check_events(Checker *c, uint32_t fam) {
+  const char *def = c->m->def;
+  size_t i;
+  for (i = 0; i < c->decls->count; i++) {
+    if (c->decls->items[i].is_event && !check_event(c, fam, &c->decls->items[i]))
+      return 0;
+  }
+  c->m->def = def;
   return 1;
 }
 
@@ -1483,7 +1540,7 @@ static int check_family(Checker *c, const Decl *d) {
     if (!check_ctor(c, fam, &d->ctors[i]))
       return 0;
   }
-  return 1;
+  return d->origin == ORIGIN_DOMAIN && strcmp(d->name, "Out") == 0 ? check_events(c, fam) : 1;
 }
 
 /* Rule D-9 (slice K3c). The argument A of the history field K of the state
@@ -1665,6 +1722,8 @@ static int check_state(Checker *c, const Decl *d) {
 }
 
 static int check_decl(Checker *c, const Decl *d) {
+  if (d->is_event)
+    return 1;
   if (d->is_state)
     return check_state(c, d);
   if (d->kind == DECL_FAMILY && d->origin == ORIGIN_PROGRAM)
@@ -2032,9 +2091,10 @@ static int run_call(Machine *m, Run *r, uint32_t line, char *const *word, uint32
   r->state = v->args[0]->args[0];
   fprintf(out, "%u %s ok\n", r->calls, name);
   for (v = v->args[0]->args[1]; val_is(v, OP_CONS); v = v->args[1]) {
-    if (!print_value(m, v->args[0], r->buf))
+    const Value *o = v->args[0];
+    if (!print_value(m, o, r->buf))
       return 1;
-    fprintf(out, "  %s\n", r->buf);
+    fprintf(out, "  %s%s\n", val_is(o, OP_CTOR) && o->inst < m->ctor_count && m->ctors[o->inst].event ? "event " : "", r->buf);
   }
   return 0;
 }

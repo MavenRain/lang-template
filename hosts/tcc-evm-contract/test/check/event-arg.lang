@@ -1,0 +1,3 @@
+-- An event field takes a value of its type (slice K4a1).
+event Paid (to : Addr) (amount : U256)
+def bad : Out := Paid 7 7u

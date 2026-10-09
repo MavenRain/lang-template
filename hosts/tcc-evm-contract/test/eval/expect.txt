@@ -50,3 +50,6 @@ map m2 => mapOf [(1, 2), (3, 4)]
 map mZero => mapOf [(1, 2)]
 map aMap => mapOf [(0x00000000000000000000000000000000000000bb, 7u)]
 map fMiss => 0
+events eOpened => Opened
+events ePaid => Paid 0x00000000000000000000000000000000000000bb 7u
+events eList => cons Opened (cons (Paid 0x00000000000000000000000000000000000000bb 7u) nil)

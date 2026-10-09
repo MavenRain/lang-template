@@ -25,7 +25,8 @@ typedef enum {
   TOK_KW_AXIOM,
   TOK_KW_TYPE,
   TOK_KW_SIGMA,
-  TOK_KW_STATE
+  TOK_KW_STATE,
+  TOK_KW_EVENT
 } TokKind;
 
 typedef struct {

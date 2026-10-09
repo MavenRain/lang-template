@@ -1,0 +1,2 @@
+-- Two fields of one event cannot have the same name (slice K4a1).
+event Pair (a : Nat) (a : U256)

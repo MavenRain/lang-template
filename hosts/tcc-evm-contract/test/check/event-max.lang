@@ -1,0 +1,2 @@
+-- An event has 16 fields or fewer, as an entry has (slice K4a1).
+event Big (a b c d e f g h i j k l m n o p q : Nat)

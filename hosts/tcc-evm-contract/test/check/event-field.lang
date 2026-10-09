@@ -1,0 +1,2 @@
+-- An event field must have an ABI word type: Nat, Flag, U256 or Addr (slice K4a1).
+event Bad (xs : List Nat)

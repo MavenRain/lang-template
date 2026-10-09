@@ -270,7 +270,8 @@ class HostListTests(unittest.TestCase):
     def test_root_lists_follow_the_hosts(self):
         # The Makefile check recipe and the bin/new-lang.sh gate case name the
         # hosts by hand, in the order of the hosts array. The README.md "make
-        # test" item names the TccKitTests hosts, in the same order.
+        # test" item names the TccKitTests hosts, in the same order, and their
+        # number as a count word.
         hosts = self.hosts()
         recipes = re.findall(r"^check:.*?$(.*?)^[a-z-]+:", (ROOT / "Makefile").read_text(),
                              re.MULTILINE | re.DOTALL)
@@ -285,10 +286,14 @@ class HostListTests(unittest.TestCase):
         kits = re.findall(r'^\s+self\.generate_and_check\("([a-z0-9-]+)"',
                           (ROOT / "tests/test_tools.py").read_text(), re.MULTILINE)
         self.assertEqual([host for host in hosts if host in kits], kits)
-        lines = re.findall(r"tests make a language from (.*?) and run its gate",
+        lines = re.findall(r"(\S+) of these tests make a language from (.*?) and run its gate",
                            " ".join((ROOT / "README.md").read_text().split()))
         self.assertEqual(len(lines), 1, lines)
-        self.assertEqual(re.findall(r"`hosts/([a-z0-9-]+)`", lines[0]), kits)
+        word, names = lines[0]
+        self.assertEqual(re.findall(r"`hosts/([a-z0-9-]+)`", names), kits)
+        numbers = ("Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight",
+                   "Nine", "Ten")
+        self.assertEqual(word, numbers[len(kits)])
 
 
 class TccKitTests(unittest.TestCase):

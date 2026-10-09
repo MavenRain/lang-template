@@ -1,0 +1,7 @@
+1 deposit ok
+  event Opened
+  event Paid 0x00000000000000000000000000000000000000bb 5u
+2 deposit ok
+  event Opened
+  event Paid 0x00000000000000000000000000000000000000cc 2u
+state makeState 7u

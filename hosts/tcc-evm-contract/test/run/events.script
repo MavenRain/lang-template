@@ -1,0 +1,3 @@
+-- A call script for examples/events.lang (kit slice K4a1): an entry that emits two named events.
+100 0x00000000000000000000000000000000000000bb deposit 5u
+101 0x00000000000000000000000000000000000000cc deposit 2u

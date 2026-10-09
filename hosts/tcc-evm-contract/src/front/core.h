@@ -174,6 +174,7 @@ typedef struct {
   uint32_t family;
   const FieldInfo *fields;
   uint32_t field_count;
+  int event; /* an event of the program, a constructor of Out (slice K4a1) */
 } CtorInfo;
 
 /* A domain family. Its constructors are ctors[first_ctor ...]. A family

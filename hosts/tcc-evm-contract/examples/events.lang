@@ -1,0 +1,18 @@
+-- Named events (kit slice K4a1): an event with no fields, and an event with an
+-- Addr field and a U256 field. An event is a constructor of Out.
+event Opened
+event Paid (to : Addr) (amount : U256)
+
+-- A state with a running total. The start state of `langc run`.
+state State := makeState (deposited : U256)
+def init : State := makeState 0u
+
+-- Entry: add the amount to the total, and emit both events.
+def deposit : (env : Env) -> (s : State) -> (amount : U256) -> Option (Prod State (List Out)) :=
+  fun (env : Env) (s : State) (amount : U256) =>
+    some (pair (makeState (u256Add (deposited s) amount)) (cons Opened (cons (Paid (caller env) amount) nil)))
+
+-- Event values.
+def eOpened : Out := Opened
+def ePaid : Out := Paid 0x00000000000000000000000000000000000000bb 7u
+def eList : List Out := cons eOpened (cons ePaid nil)
