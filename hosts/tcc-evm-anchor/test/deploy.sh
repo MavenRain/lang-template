@@ -6,10 +6,14 @@
 # must be the member count at slot 0 and the member slots. The constructor
 # guards of SPEC section 7 must revert on evm, and anchor (and amend for
 # arrow-debreu-amend, O3) must run on the deployed state. With no evm on
-# the PATH, the tests are skipped.
+# the PATH, the file runs no case: it prints `skip: N cases (evm not on
+# PATH)` (N is cases below) and adds the line to build/test/skips, and make
+# test prints the sum.
 root=$(cd "$(dirname "$0")/.." && pwd)
+cases=17  # the case count of this file; the gate compares it with the ok count
 if ! command -v evm > /dev/null 2>&1; then
-  echo 'deploy.sh: no evm on the PATH, skipped'
+  mkdir -p "$root/build/test"
+  echo "skip: $cases cases (evm not on PATH)" | tee -a "$root/build/test/skips"
   exit 0
 fi
 out=$root/build/test/chain/deploy

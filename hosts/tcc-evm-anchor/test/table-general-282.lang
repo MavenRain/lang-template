@@ -1,0 +1,36 @@
+-- Table case (SPEC section 10, M7 chunk 16), the edge of the general path:
+-- test/table-general-200.lang with 282 members. The checker runs
+-- constitution 1 at the sorted profile of each tally (SPEC section 7). The
+-- arena of one run (LANG_ARENA_MAX = 256 MiB) holds this table.
+-- test/table.sh reads the lines below: check and table exit 0, and table
+-- prints 566 tally rows.
+-- expect exit 0
+-- expect rows 566
+def members : Nat := 282
+
+-- Candidate 0, the genesis policy: the log admits anchors.
+def openLog : Policy := mkPolicy allow nonZero blockTime 0 1 flagYes
+
+-- Candidate 1: the log admits no anchor.
+def closedLog : Policy := mkPolicy deny nonZero blockTime 0 1 flagYes
+
+def candidates : Candidates := consPolicy openLog (lastPolicy closedLog)
+
+def rule : Tally -> Outcome := fun (t : Tally) =>
+  case natLt (tallyCount 1 t) (tallyCount 0 t) with
+  | 0 (u : prod ()) => one closedLog
+  | 1 (u : prod ()) => one openLog
+
+-- Constitution 1: the open policy only at the tally of 3 ballots of 0.
+def unanimous : Tally -> Outcome := fun (t : Tally) =>
+  case natEq (tallyCount 0 t) 3 with
+  | 0 (u : prod ()) => one closedLog
+  | 1 (u : prod ()) => one openLog
+
+def amendments : Constitutions := lastConstitution (fun (x : Profile) => unanimous (orbitProjection x))
+
+-- amendTo p k: the policy p may move to constitution k.
+def amendTo : Policy -> Nat -> Flag := fun (p : Policy) (k : Nat) =>
+  case verdictFlag (policyAdmit p) with
+  | 0 (u : prod ()) => natEq k 0
+  | 1 (u : prod ()) => flagYes

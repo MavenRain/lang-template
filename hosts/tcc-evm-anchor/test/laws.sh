@@ -9,10 +9,14 @@
 # arrow-debreu-amend.lang), there is no admit at a tally two, and a dispute
 # is metadata: it changes no storage and no verify, and a program with no
 # window has no dispute entry (O7, arrow-debreu-dispute.lang). With no evm
-# on the PATH, the tests are skipped.
+# on the PATH, the file runs no case: it prints `skip: N cases (evm not on
+# PATH)` (N is cases below) and adds the line to build/test/skips, and make
+# test prints the sum.
 root=$(cd "$(dirname "$0")/.." && pwd)
+cases=40  # the case count of this file; the gate compares it with the ok count
 if ! command -v evm > /dev/null 2>&1; then
-  echo 'laws.sh: no evm on the PATH, skipped'
+  mkdir -p "$root/build/test"
+  echo "skip: $cases cases (evm not on PATH)" | tee -a "$root/build/test/skips"
   exit 0
 fi
 out=$root/build/test/chain/laws

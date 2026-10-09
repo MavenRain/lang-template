@@ -1,0 +1,6 @@
+-- REFUSE_LOWER (slice K4b): an entry that changes a List field (no List write until K4c).
+state State := makeState (items : List Nat) (count : Nat)
+def init : State := makeState nil 0
+
+def prepend : (env : Env) -> (s : State) -> (x : Nat) -> Option (Prod State (List Out)) :=
+  fun (env : Env) (s : State) (x : Nat) => some (pair (makeState (cons x (items s)) (count s)) nil)

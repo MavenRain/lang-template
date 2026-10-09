@@ -48,27 +48,36 @@ as `langc: CODE: DEF: message`.
 ## Gate
 
 `make check` runs `test/gate.sh`. It runs one step for each test file, in
-the order of the anchor-lang `make test` (`test/gate.sh:14-23`). Each step
+the order of the anchor-lang `make test` (`test/gate.sh:20-29`). Each step
 prints its own counts. Then it scans the kit for an em-dash or an en-dash.
-The last line is `gate: N failures`, and the gate exits 1 when N is more
+The summary line is `gate: N failures`, and the gate exits 1 when N is more
 than 0.
 
-The ok counts after the M6 refresh (2026-10-09) are the same as
-anchor-lang chunk 14:
+When `evm` is not on PATH, `test/run.sh`, `test/deploy.sh`, `test/diff.sh`
+and `test/laws.sh` run no case. Each one prints `skip: N cases (evm not on
+PATH)` and adds the line to `build/test/skips`. The gate empties that file
+before the first step. After the summary line, the gate prints the skip
+sum, `gate: skip sum N cases`, with ` (evm not on PATH)` when N is more
+than 0 (`test/gate.sh:36`). A skip is not a pass and not a fail. With
+`evm`, the sum is 0. With no `evm`, the sum is 193 (55 + 17 + 81 + 40), and
+the gate shows 0 failures.
+
+The ok counts after the M7 port (2026-10-09) are the same as anchor-lang
+chunk 17:
 
 | Test file | ok |
 | --- | --- |
 | `test/parse.sh` | 46 |
 | `test/evm.sh` | 9 |
 | `test/check.sh` | 53 |
-| `test/table.sh` | 21 |
+| `test/table.sh` | 26 |
 | `test/eval.sh` | 36 |
 | `test/build.sh` | 54 |
 | `test/run.sh` | 55 |
 | `test/deploy.sh` | 17 |
 | `test/diff.sh` | 81 |
 | `test/laws.sh` | 40 |
-| total | 412 |
+| total | 417 |
 
 ## Tools
 
@@ -137,8 +146,9 @@ The USER ruled the host name, the faithful port, the scan excludes
   `check` and `clean`. There is no `test` target, because `test/gate.sh`
   replaces it. The TCC and clang flags and the `FRONT` and `BACK` lists
   are the anchor-lang ones (`Makefile:5-12`).
-- f. `test/gate.sh` has the tcc-evm-dao `step()` form (`test/gate.sh:8-11`).
-- g. The silent skips stay (see "Kit debt").
+- f. `test/gate.sh` has the tcc-evm-dao `step()` form (`test/gate.sh:12-15`).
+- g. The port kept the silent skips. M7 changed them to a counted skip
+  (see "Gate").
 - h. This README has the tcc-evm-dao form.
 - i. The port did not change anchor-lang.
 
@@ -147,11 +157,5 @@ The USER ruled the host name, the faithful port, the scan excludes
 - The domain entries are in `src/evm.c`. The tcc-evm-dao split
   (`src/asm.h` for the writer API and `domain/entries.c` for the entries)
   is not done.
-- Silent skips: `test/run.sh:29-31`, `test/deploy.sh:10-12`,
-  `test/diff.sh:13-15` and `test/laws.sh:11` exit 0 with no cases when
-  `evm` is not on PATH. Then the gate shows 0 failures, and only the ok
-  counts of those 4 files go down (193 of the 412 cases).
-- The host matrix in `formers/FORMERS.md` of lang-template has no column
-  for this kit, as for tcc-evm-contract and tcc-evm-dao.
 - The source comments and `docs/CAPABILITY.md` cite sections of the
   anchor-lang SPEC.md, which is not in the kit.

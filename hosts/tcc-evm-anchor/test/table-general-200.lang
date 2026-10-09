@@ -1,0 +1,36 @@
+-- Table case (SPEC section 10, M7 chunk 15), the general path of the
+-- differential pair: test/table-short-200.lang with constitution 1 in a
+-- different form, `fun (x : Profile) => unanimous (orbitProjection x)`.
+-- This is not the closure of `constitutionOf`, thus the checker runs it at
+-- the sorted profile of each tally (SPEC section 7).  test/table.sh reads
+-- the lines below: check and table exit 0, and table prints 402 tally rows.
+-- expect exit 0
+-- expect rows 402
+def members : Nat := 200
+
+-- Candidate 0, the genesis policy: the log admits anchors.
+def openLog : Policy := mkPolicy allow nonZero blockTime 0 1 flagYes
+
+-- Candidate 1: the log admits no anchor.
+def closedLog : Policy := mkPolicy deny nonZero blockTime 0 1 flagYes
+
+def candidates : Candidates := consPolicy openLog (lastPolicy closedLog)
+
+def rule : Tally -> Outcome := fun (t : Tally) =>
+  case natLt (tallyCount 1 t) (tallyCount 0 t) with
+  | 0 (u : prod ()) => one closedLog
+  | 1 (u : prod ()) => one openLog
+
+-- Constitution 1: the open policy only at the tally of 3 ballots of 0.
+def unanimous : Tally -> Outcome := fun (t : Tally) =>
+  case natEq (tallyCount 0 t) 3 with
+  | 0 (u : prod ()) => one closedLog
+  | 1 (u : prod ()) => one openLog
+
+def amendments : Constitutions := lastConstitution (fun (x : Profile) => unanimous (orbitProjection x))
+
+-- amendTo p k: the policy p may move to constitution k.
+def amendTo : Policy -> Nat -> Flag := fun (p : Policy) (k : Nat) =>
+  case verdictFlag (policyAdmit p) with
+  | 0 (u : prod ()) => natEq k 0
+  | 1 (u : prod ()) => flagYes

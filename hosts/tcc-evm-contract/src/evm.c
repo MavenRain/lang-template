@@ -12,12 +12,24 @@ enum { EVM_SIGNATURE = 256 };
 
 const char target_name[] = "evm";
 
-/* NAME(uint256,...) with one uint256 for each parameter: Nat and Flag are
-   both one word. Returns the length, or 0 when it does not fit. */
+/* The ABI type name of a scalar (C-K4-6). */
+static const char *abi_type(IrScalar s) {
+  switch (s) {
+  case IR_SCALAR_NAT: return "uint64";
+  case IR_SCALAR_FLAG: return "bool";
+  case IR_SCALAR_U256: return "uint256";
+  case IR_SCALAR_ADDR: return "address";
+  }
+  return "uint256";
+}
+
+/* NAME(TYPE,...) with the ABI type of each parameter: Nat = uint64,
+   Flag = bool, U256 = uint256, Addr = address. Returns the length, or 0
+   when it does not fit. */
 static size_t signature(char *text, const IrFunc *fn) {
   int used = snprintf(text, EVM_SIGNATURE, "%s(", fn->name);
   for (size_t i = 0; used > 0 && used < EVM_SIGNATURE && i < fn->param_count; i++) {
-    used += snprintf(text + used, EVM_SIGNATURE - (size_t)used, "%suint256", i == 0 ? "" : ",");
+    used += snprintf(text + used, EVM_SIGNATURE - (size_t)used, "%s%s", i == 0 ? "" : ",", abi_type(fn->params[i]));
   }
   if (used > 0 && used < EVM_SIGNATURE) used += snprintf(text + used, EVM_SIGNATURE - (size_t)used, ")");
   return used > 0 && used < EVM_SIGNATURE ? (size_t)used : 0;
@@ -44,6 +56,189 @@ int target_write(const IrProgram *prog, TargetPart part, FILE *out, FILE *err) {
   return 0;
 }
 
+/* IR to EVM (C-K4b-1, C-K4b-7). Local k is the memory word at 32 * k. The
+   two words after the locals of an entry are a scratch for KECCAK and
+   MUL_TRAP: they use it only after both operands are on the stack. */
+typedef struct {
+  Asm *a;
+  uint64_t scratch;
+  Label revert;
+  Label trap;
+} Emit;
+
+static void emit_ops(Asm *a, const Op *ops, size_t count) {
+  for (size_t i = 0; i < count; i++) asm_op(a, ops[i]);
+}
+
+static int emit_expr(Emit *e, const IrExpr *x);
+
+/* RIGHT, then LEFT on top: the EVM operand order of SUB, DIV, LT and GT. */
+static int emit_operands(Emit *e, const IrExpr *x) {
+  return emit_expr(e, x->right) && emit_expr(e, x->left);
+}
+
+static void emit_load(Asm *a, uint64_t at) {
+  asm_push(a, at);
+  asm_op(a, EVM_OP_MLOAD);
+}
+
+static void emit_store(Asm *a, uint64_t at) {
+  asm_push(a, at);
+  asm_op(a, EVM_OP_MSTORE);
+}
+
+static int emit_binary(Emit *e, const IrExpr *x) {
+  static const Op sub_sat[] = {EVM_OP_DUP2,  EVM_OP_DUP2,  EVM_OP_SUB,    EVM_OP_SWAP2,
+                               EVM_OP_SWAP1, EVM_OP_LT,    EVM_OP_ISZERO, EVM_OP_MUL};
+  static const Op min[] = {EVM_OP_DUP2,   EVM_OP_DUP2,  EVM_OP_SUB,   EVM_OP_SWAP2, EVM_OP_DUP2,
+                           EVM_OP_LT,     EVM_OP_ISZERO, EVM_OP_SWAP2, EVM_OP_SWAP1, EVM_OP_SWAP2,
+                           EVM_OP_MUL,    EVM_OP_SWAP1, EVM_OP_SUB};
+  static const Op add_trap[] = {EVM_OP_DUP1, EVM_OP_SWAP2, EVM_OP_ADD, EVM_OP_DUP1,
+                                EVM_OP_SWAP2, EVM_OP_SWAP1, EVM_OP_LT};
+  Asm *a = e->a;
+  if (x->op == IR_OP_DIV) {
+    if (!emit_expr(e, x->right)) return 0;
+    emit_ops(a, (const Op[]){EVM_OP_DUP1, EVM_OP_ISZERO}, 2);
+    asm_jump_if(a, e->trap);
+    if (!emit_expr(e, x->left)) return 0;
+    asm_op(a, EVM_OP_DIV);
+    return 1;
+  }
+  if (!emit_operands(e, x)) return 0;
+  switch (x->op) {
+  case IR_OP_ADD: asm_op(a, EVM_OP_ADD); asm_push(a, UINT64_MAX); asm_op(a, EVM_OP_AND); return 1;
+  case IR_OP_MUL: asm_op(a, EVM_OP_MUL); asm_push(a, UINT64_MAX); asm_op(a, EVM_OP_AND); return 1;
+  case IR_OP_SUB: emit_ops(a, sub_sat, sizeof sub_sat / sizeof sub_sat[0]); return 1;
+  case IR_OP_EQ: asm_op(a, EVM_OP_EQ); return 1;
+  case IR_OP_LE: emit_ops(a, (const Op[]){EVM_OP_GT, EVM_OP_ISZERO}, 2); return 1;
+  case IR_OP_LT: asm_op(a, EVM_OP_LT); return 1;
+  case IR_OP_OR: asm_op(a, EVM_OP_OR); return 1;
+  case IR_OP_MIN: emit_ops(a, min, sizeof min / sizeof min[0]); return 1;
+  case IR_OP_ADD_CARRY:
+  case IR_OP_MUL_CARRY:
+    asm_op(a, x->op == IR_OP_ADD_CARRY ? EVM_OP_ADD : EVM_OP_MUL);
+    asm_push(a, UINT64_MAX);
+    asm_op(a, EVM_OP_LT);
+    return 1;
+  case IR_OP_ADD64:
+  case IR_OP_MUL64:
+    emit_ops(a, (const Op[]){x->op == IR_OP_ADD64 ? EVM_OP_ADD : EVM_OP_MUL, EVM_OP_DUP1}, 2);
+    asm_push(a, UINT64_MAX);
+    asm_op(a, EVM_OP_LT);
+    asm_jump_if(a, e->trap);
+    return 1;
+  case IR_OP_ADD_TRAP:
+    emit_ops(a, add_trap, sizeof add_trap / sizeof add_trap[0]);
+    asm_jump_if(a, e->trap);
+    return 1;
+  case IR_OP_MUL_TRAP: /* left != 0 and product / left != right */
+    asm_op(a, EVM_OP_DUP1);
+    emit_store(a, e->scratch);
+    asm_op(a, EVM_OP_DUP2);
+    emit_store(a, e->scratch + 32);
+    emit_ops(a, (const Op[]){EVM_OP_MUL, EVM_OP_DUP1}, 2);
+    emit_load(a, e->scratch);
+    emit_ops(a, (const Op[]){EVM_OP_SWAP1, EVM_OP_DIV}, 2);
+    emit_load(a, e->scratch + 32);
+    emit_ops(a, (const Op[]){EVM_OP_EQ, EVM_OP_ISZERO}, 2);
+    emit_load(a, e->scratch);
+    emit_ops(a, (const Op[]){EVM_OP_ISZERO, EVM_OP_ISZERO, EVM_OP_AND}, 3);
+    asm_jump_if(a, e->trap);
+    return 1;
+  case IR_OP_KECCAK:
+    emit_store(a, e->scratch);
+    emit_store(a, e->scratch + 32);
+    asm_push(a, 64);
+    asm_push(a, e->scratch);
+    asm_op(a, EVM_OP_SHA3);
+    return 1;
+  case IR_OP_DIV: return 0;
+  }
+  return 0;
+}
+
+static int emit_expr(Emit *e, const IrExpr *x) {
+  switch (x->kind) {
+  case IR_EXPR_CONST: asm_push(e->a, x->value); return 1;
+  case IR_EXPR_LOCAL: emit_load(e->a, 32u * (uint64_t)x->local); return 1;
+  case IR_EXPR_BINARY: return emit_binary(e, x);
+  case IR_EXPR_LOAD: return 0; /* no heap blocks on the EVM path */
+  case IR_EXPR_WORD: asm_push_word(e->a, x->word); return 1;
+  case IR_EXPR_ENV: asm_op(e->a, x->field == IR_ENV_NOW ? EVM_OP_TIMESTAMP : EVM_OP_CALLER); return 1;
+  case IR_EXPR_SLOAD:
+    if (!emit_expr(e, x->left)) return 0;
+    asm_op(e->a, EVM_OP_SLOAD);
+    return 1;
+  }
+  return 0;
+}
+
+static int emit_block(Emit *e, IrBlock b);
+
+static int emit_stmt(Emit *e, const IrStmt *s) {
+  Asm *a = e->a;
+  switch (s->kind) {
+  case IR_STMT_SET:
+    if (!emit_expr(e, s->expr)) return 0;
+    emit_store(a, 32u * (uint64_t)s->local);
+    return 1;
+  case IR_STMT_IF: {
+    Label no = asm_label(a), end = asm_label(a);
+    if (!emit_expr(e, s->expr)) return 0;
+    asm_op(a, EVM_OP_ISZERO);
+    asm_jump_if(a, no);
+    if (!emit_block(e, s->body)) return 0;
+    asm_jump(a, end);
+    asm_jumpdest(a, no);
+    if (!emit_block(e, s->otherwise)) return 0;
+    asm_jumpdest(a, end);
+    return 1;
+  }
+  case IR_STMT_SSTORE:
+    if (!emit_expr(e, s->value) || !emit_expr(e, s->expr)) return 0;
+    asm_op(a, EVM_OP_SSTORE);
+    return 1;
+  case IR_STMT_TRAP: asm_jump(a, e->trap); return 1;
+  case IR_STMT_REVERT: asm_jump(a, e->revert); return 1;
+  case IR_STMT_STOP: asm_op(a, EVM_OP_STOP); return 1;
+  case IR_STMT_ALLOC:
+  case IR_STMT_SWITCH:
+  case IR_STMT_REPEAT:
+  case IR_STMT_WHILE:
+  case IR_STMT_RETURN: return 0;
+  }
+  return 0;
+}
+
+static int emit_block(Emit *e, IrBlock b) {
+  int ok = 1;
+  for (size_t i = 0; ok && i < b.count; i++) ok = emit_stmt(e, b.items[i]);
+  return ok;
+}
+
+/* One block per entry at label FIRST + i, then the shared empty REVERT
+   block (C-K4-8) and the shared Trap() REVERT block (C-K4-9). The dispatcher
+   head and the decode come in K4b2. Returns 0 on an IR form that the EVM
+   back end does not lower (a heap block, a loop, a switch or a RETURN). */
+static int evm_entries(Asm *a, const IrProgram *prog, Label first) {
+  Emit e = {a, 0, asm_label(a), asm_label(a)};
+  int ok = 1;
+  for (size_t i = 0; ok && i < prog->func_count; i++) {
+    e.scratch = 32u * (uint64_t)prog->funcs[i].local_count;
+    asm_jumpdest(a, first + (Label)i);
+    ok = emit_block(&e, prog->funcs[i].body);
+  }
+  asm_jumpdest(a, e.revert);
+  emit_ops(a, (const Op[]){EVM_OP_PUSH0, EVM_OP_PUSH0, EVM_OP_REVERT}, 3);
+  asm_jumpdest(a, e.trap);
+  asm_push(a, 0xae96083aU);
+  asm_push(a, 224);
+  emit_ops(a, (const Op[]){EVM_OP_SHL, EVM_OP_PUSH0, EVM_OP_MSTORE}, 3);
+  asm_push(a, 4);
+  emit_ops(a, (const Op[]){EVM_OP_PUSH0, EVM_OP_REVERT}, 2);
+  return ok;
+}
+
 static int is_zero(const unsigned char *w) {
   for (int i = 0; i < 32; i++)
     if (w[i] != 0) return 0;
@@ -52,15 +247,24 @@ static int is_zero(const unsigned char *w) {
 
 /* Slice K4a. The asm messages go to a null sink: the caller writes the
    diagnostic from the return code. */
-EvmBuild evm_build(const unsigned char (*pairs)[64], size_t count, TargetPart part, FILE *out) {
-  Asm *a = calloc(3, sizeof(Asm));
+EvmBuild evm_build(const IrProgram *prog, const unsigned char (*pairs)[64], size_t count, TargetPart part,
+                   FILE *out) {
+  Asm *a = calloc(4, sizeof(Asm));
   FILE *sink = fopen("/dev/null", "w");
   if (a == NULL || sink == NULL) {
     free(a);
     if (sink != NULL) fclose(sink);
     return EVM_BUILD_OOM;
   }
-  Asm *stores = &a[0], *runtime = &a[1], *code = &a[2];
+  Asm *stores = &a[0], *runtime = &a[1], *code = &a[2], *entries = &a[3];
+  Label first = prog->func_count > 0 ? asm_label(entries) : 0;
+  for (size_t i = 1; i < prog->func_count; i++) asm_label(entries);
+  if (!evm_entries(entries, prog, first)) {
+    fclose(sink);
+    free(a);
+    return EVM_BUILD_IR;
+  }
+  /* The K4a runtime stays until the dispatcher lands (K4b2). */
   asm_op(runtime, EVM_OP_PUSH0);
   asm_op(runtime, EVM_OP_PUSH0);
   asm_op(runtime, EVM_OP_REVERT);
@@ -70,7 +274,7 @@ EvmBuild evm_build(const unsigned char (*pairs)[64], size_t count, TargetPart pa
     asm_push_word(stores, pairs[i]);
     asm_op(stores, EVM_OP_SSTORE);
   }
-  EvmBuild result = stores->full || !asm_finish(runtime, sink)
+  EvmBuild result = stores->full || !asm_finish(entries, sink) || !asm_finish(runtime, sink)
                         || (part != TARGET_PART_RUNTIME && !asm_creation_store(code, stores, runtime, sink))
                         ? EVM_BUILD_SIZE
                     : asm_write_hex(part == TARGET_PART_RUNTIME ? runtime : code, out, sink) ? EVM_BUILD_OK

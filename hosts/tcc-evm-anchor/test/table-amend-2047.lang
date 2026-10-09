@@ -1,0 +1,37 @@
+-- Table case (SPEC section 10, M7 chunk 15): the defs of
+-- examples/programs/arrow-debreu-amend.lang with 2047 members, without the
+-- two defs for langc eval.  Constitution 1 is `constitutionOf unanimous`,
+-- thus the checker applies `unanimous` to each tally and builds no profile
+-- (SPEC section 7, a1b).  R = 2048 tallies and C = 2 constitutions give
+-- C R = 4096 rows, the table limit.  test/table.sh reads the lines below:
+-- check and table exit 0, and table prints 4096 tally rows.
+-- expect exit 0
+-- expect rows 4096
+def members : Nat := 2047
+
+-- Candidate 0, the genesis policy: the log admits anchors.
+def openLog : Policy := mkPolicy allow nonZero blockTime 0 1 flagYes
+
+-- Candidate 1: the log admits no anchor.
+def closedLog : Policy := mkPolicy deny nonZero blockTime 0 1 flagYes
+
+def candidates : Candidates := consPolicy openLog (lastPolicy closedLog)
+
+def rule : Tally -> Outcome := fun (t : Tally) =>
+  case natLt (tallyCount 1 t) (tallyCount 0 t) with
+  | 0 (u : prod ()) => one closedLog
+  | 1 (u : prod ()) => one openLog
+
+-- Constitution 1: the open policy only at the tally of 3 ballots of 0.
+def unanimous : Tally -> Outcome := fun (t : Tally) =>
+  case natEq (tallyCount 0 t) 3 with
+  | 0 (u : prod ()) => one closedLog
+  | 1 (u : prod ()) => one openLog
+
+def amendments : Constitutions := lastConstitution (constitutionOf unanimous)
+
+-- amendTo p k: the policy p may move to constitution k.
+def amendTo : Policy -> Nat -> Flag := fun (p : Policy) (k : Nat) =>
+  case verdictFlag (policyAdmit p) with
+  | 0 (u : prod ()) => natEq k 0
+  | 1 (u : prod ()) => flagYes

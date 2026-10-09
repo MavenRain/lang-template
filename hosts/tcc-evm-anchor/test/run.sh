@@ -11,7 +11,9 @@
 # writes the Amended log, with the guards of O3 b3 to b6, and anchor and
 # cast read the rows of the constitution in slot K + M. dispute (chunk 13)
 # writes the Disputed log and no slot while the block time is less than
-# t + window (O7). With no evm on the PATH, the tests are skipped. Files go to build/test.
+# t + window (O7). With no evm on the PATH, the file runs no case: it prints
+# `skip: N cases (evm not on PATH)` (N is cases below) and adds the line to
+# build/test/skips, and make test prints the sum. Files go to build/test.
 set -u
 root=$(cd "$(dirname "$0")/.." && pwd)
 langc=$root/build/langc
@@ -29,8 +31,9 @@ same() {
   if [ "$2" = "$3" ]; then pass "$1"; else fail "$1: got $2, want $3"; fi
 }
 
+cases=55  # the case count of this file; the gate compares it with the ok count
 if ! command -v evm > /dev/null 2>&1; then
-  echo 'run.sh: no evm on the PATH, skipped'
+  echo "skip: $cases cases (evm not on PATH)" | tee -a "$out/skips"
   exit 0
 fi
 

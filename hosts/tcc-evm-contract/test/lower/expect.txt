@@ -5,3 +5,5 @@ no-state.lang REFUSE_LOWER
 option.lang REFUSE_LOWER
 prod.lang REFUSE_LOWER
 records.lang REFUSE_LOWER
+list-write.lang REFUSE_LOWER
+nat-fold.lang REFUSE_LOWER

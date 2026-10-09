@@ -20,9 +20,9 @@ static int runtime_size(void) {
     pairs[i][30] = (unsigned char)(i >> 8);
     pairs[i][31] = (unsigned char)i;
   }
-  int ok = evm_build((const unsigned char (*)[64])pairs, 1000, TARGET_PART_MAIN, out) == EVM_BUILD_SIZE
+  int ok = evm_build(&(IrProgram){NULL, 0}, (const unsigned char (*)[64])pairs, 1000, TARGET_PART_MAIN, out) == EVM_BUILD_SIZE
     && ftell(out) == 0;
-  ok = ok && evm_build((const unsigned char (*)[64])pairs, 1000, TARGET_PART_RUNTIME, out) == EVM_BUILD_OK;
+  ok = ok && evm_build(&(IrProgram){NULL, 0}, (const unsigned char (*)[64])pairs, 1000, TARGET_PART_RUNTIME, out) == EVM_BUILD_OK;
   rewind(out);
   size_t len = fread(hex, 1, sizeof hex - 1u, out);
   ok = ok && !ferror(out) && len == 7u && strcmp(hex, "5f5ffd\n") == 0;

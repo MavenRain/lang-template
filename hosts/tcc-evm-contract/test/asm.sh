@@ -5,7 +5,9 @@ set -eu
 fail=0
 build/asmtool || fail=$((fail + 1))
 
-want="addPrice 0x57279353"
+# addPrice(uint64,bool,uint256,address), then Trap() (C-K4-9).
+want="addPrice 0x75de1ccc
+Trap 0xae96083a"
 got=$(build/asmtool abi)
 [ "$got" = "$want" ] || { echo "FAIL abi: want $want, got $got"; fail=$((fail + 1)); }
 

@@ -1731,12 +1731,17 @@ static AnchorRow outcome_row(C *c, Value *o, const char *what, const char *at, V
   return row;
 }
 
+/* The tally COUNTS as a value: mkTally of the count function. */
+static Value *tally_value(C *c, const unsigned *counts, size_t k) {
+  return apply(c, find_global(c, "mkTally")->value, count_fn(c, counts, k));
+}
+
 /* The row of the tally COUNTS: rule at mkTally of the count function. */
 static AnchorRow tally_row(C *c, const unsigned *counts, size_t k, Value **policies, size_t *n) {
   char at[256];
   tally_text(at, sizeof at, counts, k);
   c->fuel = CHECK_FUEL;
-  Value *tally = apply(c, find_global(c, "mkTally")->value, count_fn(c, counts, k));
+  Value *tally = tally_value(c, counts, k);
   return outcome_row(c, apply(c, find_global(c, "rule")->value, tally), "rule", at, policies, n);
 }
 
@@ -1751,16 +1756,31 @@ static Value *sorted_profile(C *c, const unsigned *counts, size_t k) {
   return x;
 }
 
+/* R when the constitution F is constitutionOf R: a closure of the inner
+ * lambda of the prelude constitutionOf (the same body node), with R in its
+ * environment. Else NULL. The test is on the closure, not on the meaning. */
+static Value *constitution_rule(const C *c, const Value *f) {
+  const Global *of = find_global(c, "constitutionOf");
+  const Value *v = of != NULL && of->prelude ? of->value : NULL;
+  const Ast *outer = v != NULL && v->kind == V_LAM ? v->body : NULL;
+  int same = outer != NULL && outer->kind == AST_LAM && f->kind == V_LAM && f->body == outer->u.bind.body;
+  return same && f->env != NULL ? f->env->value : NULL;
+}
+
 /* The row of constitution B >= 1 at the tally COUNTS: its outcome at the
- * sorted profile of COUNTS. */
+ * sorted profile of COUNTS. For constitutionOf r, the row is r at the tally
+ * COUNTS, and the checker builds no profile (SPEC section 7, a1b): at the
+ * sorted profile, orbitProjection gives that tally, so the row is the same. */
 static AnchorRow profile_row(C *c, size_t b, const unsigned *counts, size_t k, Value **policies, size_t *n) {
   char at[256];
   char what[64];
   tally_text(at, sizeof at, counts, k);
   snprintf(what, sizeof what, "constitution %lu", (unsigned long)b);
   c->fuel = CHECK_FUEL;
-  Value *x = sorted_profile(c, counts, k);
-  return outcome_row(c, apply(c, c->amends[b - 1], x), what, at, policies, n);
+  Value *f = c->amends[b - 1];
+  Value *r = constitution_rule(c, f);
+  Value *o = r != NULL ? apply(c, r, tally_value(c, counts, k)) : apply(c, f, sorted_profile(c, counts, k));
+  return outcome_row(c, o, what, at, policies, n);
 }
 
 /* One mask for each of the N policies (O3, my choice 5): bit B is set when

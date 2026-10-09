@@ -2,8 +2,9 @@
 # Table tests of langc, run by make test after make (SPEC section 10,
 # chunk 4a): the table of each example program gives its fate at every
 # tally, each mutant keeps its code under table, and TABLE_LIMIT bounds the
-# table. Files go to build/test. Each run stays far under 4 GB: the arena
-# of one run takes at most LANG_ARENA_MAX (src/syntax.h).
+# table. Each table case test/table-*.lang gives its result on its expect
+# lines (M7). Files go to build/test. Each run stays far under 4 GB: the
+# arena of one run takes at most LANG_ARENA_MAX (src/syntax.h).
 set -u
 root=$(cd "$(dirname "$0")/.." && pwd)
 langc=$root/build/langc
@@ -151,6 +152,41 @@ if [ "$status" -eq 1 ] && [ "$shape" -eq 1 ]; then
 else
   fail "2048 members and 2 constitutions: exit $status, stderr: $err"
 fi
+
+# The table cases (M7): each test/table-*.lang program gives its expected
+# result on its "-- expect" lines. "exit N": check and table exit N. "rows
+# N": table prints N tally rows. "same FILE": table prints the same bytes as
+# the table of test/FILE. "code CODE": the first stderr line of check and
+# of table starts with "langc: CODE: ". This loop is the same for each
+# case.
+expect_line() { awk -v key="$1" '$1 == "--" && $2 == "expect" && $3 == key { print $4; exit }' "$2"; }
+has_code() { awk -v c="langc: $1: " 'NR == 1 { ok = index($0, c) == 1 } END { exit !ok }' "$2"; }
+for f in "$root"/test/table-*.lang; do
+  case_name=$(basename "$f")
+  want_exit=$(expect_line exit "$f")
+  want_rows=$(expect_line rows "$f")
+  want_code=$(expect_line code "$f")
+  same=$(expect_line same "$f")
+  "$langc" check "$f" > /dev/null 2> "$out/case-check.err"
+  check_status=$?
+  "$langc" table "$f" > "$out/case.out" 2> "$out/case.err"
+  status=$?
+  rows=$(awk '/^tally/' "$out/case.out" | wc -l | tr -d ' ')
+  ok=1
+  [ "$check_status" = "$want_exit" ] || ok=0
+  [ "$status" = "$want_exit" ] || ok=0
+  [ -z "$want_rows" ] || [ "$rows" = "$want_rows" ] || ok=0
+  [ -z "$want_code" ] || { has_code "$want_code" "$out/case-check.err" && has_code "$want_code" "$out/case.err"; } || ok=0
+  if [ -n "$same" ]; then
+    "$langc" table "$root/test/$same" > "$out/case-same.out" 2>&1
+    cmp -s "$out/case.out" "$out/case-same.out" || ok=0
+  fi
+  if [ "$ok" -eq 1 ]; then
+    pass "$case_name gives the result of its expect lines"
+  else
+    fail "$case_name: check exit $check_status, table exit $status, $rows tally rows, stderr: $(cat "$out/case.err")"
+  fi
+done
 
 if [ "$failures" -ne 0 ]; then
   printf '%s table test(s) failed\n' "$failures"

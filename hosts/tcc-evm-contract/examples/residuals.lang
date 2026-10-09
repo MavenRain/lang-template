@@ -1,0 +1,30 @@
+-- Entries for the K4b lowering: none, a trap, a history add, mapGet and mapSet.
+state State := makeState (owner : Addr) (held : U256) history (earned : U256) (count : Nat) (book : Map Nat U256)
+
+def init : State := makeState 0x00000000000000000000000000000000000000aa 0u 0u 0 mapEmpty
+
+-- Entry: always revert with empty data (none).
+def refuse : (env : Env) -> (s : State) -> Option (Prod State (List Out)) :=
+  fun (env : Env) (s : State) => none
+
+-- Entry: always trap (division by zero).
+def crash : (env : Env) -> (s : State) -> Option (Prod State (List Out)) :=
+  fun (env : Env) (s : State) =>
+    some (pair (makeState (owner s) (u256Div 7u (toU256 0)) (earned s) (count s) (book s)) nil)
+
+-- Entry: add to the history field earned and count the calls.
+def earn : (env : Env) -> (s : State) -> (x : U256) -> Option (Prod State (List Out)) :=
+  fun (env : Env) (s : State) (x : U256) =>
+    some (pair (makeState (owner s) (held s) (u256Add (earned s) x) (natAdd (count s) 1) (book s)) nil)
+
+-- Entry: put a value in the book, then add the value at another key to held.
+def file : (env : Env) -> (s : State) -> (k : Nat) -> (v : U256) -> (j : Nat) -> Option (Prod State (List Out)) :=
+  fun (env : Env) (s : State) (k : Nat) (v : U256) (j : Nat) =>
+    some (pair (makeState (owner s) (u256Add (held s) (mapGet (book s) j)) (earned s) (count s) (mapSet (book s) k v)) nil)
+
+-- Entry: the caller is the owner, else none.
+def own : (env : Env) -> (s : State) -> Option (Prod State (List Out)) :=
+  fun (env : Env) (s : State) =>
+    flagIf (addrEq (caller env) (owner s))
+      (some (pair (makeState (owner s) (u256Min (held s) 5u) (earned s) (natSub (count s) 1) (book s)) nil))
+      none

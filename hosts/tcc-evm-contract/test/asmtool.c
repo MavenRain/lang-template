@@ -75,14 +75,19 @@ static int check_refusals(FILE *quiet) {
   return 0;
 }
 
+/* One row with each scalar type, then the Trap() selector of C-K4-9 (a
+   name with no parameters). */
 static int abi(FILE *out, FILE *err) {
-  static const IrScalar params[] = {IR_SCALAR_NAT, IR_SCALAR_FLAG};
+  static const IrScalar params[] = {IR_SCALAR_NAT, IR_SCALAR_FLAG, IR_SCALAR_U256, IR_SCALAR_ADDR};
   IrFunc fn;
+  IrFunc trap;
   memset(&fn, 0, sizeof fn);
+  memset(&trap, 0, sizeof trap);
   fn.name = "addPrice";
   fn.params = params;
-  fn.param_count = 2;
-  return target_abi_line(&fn, out, err);
+  fn.param_count = 4;
+  trap.name = "Trap";
+  return target_abi_line(&fn, out, err) && target_abi_line(&trap, out, err);
 }
 
 static int checks(const Asm *runtime) {

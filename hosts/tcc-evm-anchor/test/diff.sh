@@ -9,11 +9,14 @@
 # or the output word), the log and the full storage after the call. Each
 # case compares the prediction with the evm result. The model reads the
 # table of langc, so these tests check the contract against the table;
-# test/table.sh checks the table. With no evm on the PATH, the tests are
-# skipped.
+# test/table.sh checks the table. With no evm on the PATH, the file runs no
+# case: it prints `skip: N cases (evm not on PATH)` (N is cases below) and
+# adds the line to build/test/skips, and make test prints the sum.
 root=$(cd "$(dirname "$0")/.." && pwd)
+cases=81  # the case count of this file; the gate compares it with the ok count
 if ! command -v evm > /dev/null 2>&1; then
-  echo 'diff.sh: no evm on the PATH, skipped'
+  mkdir -p "$root/build/test"
+  echo "skip: $cases cases (evm not on PATH)" | tee -a "$root/build/test/skips"
   exit 0
 fi
 out=$root/build/test/chain/diff

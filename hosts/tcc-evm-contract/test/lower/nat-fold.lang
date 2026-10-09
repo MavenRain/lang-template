@@ -1,0 +1,7 @@
+-- REFUSE_LOWER (slice K4b): recursion that is not a fold over a List field (a fold over a Nat argument).
+state State := makeState (count : Nat)
+def init : State := makeState 0
+
+def bump : (env : Env) -> (s : State) -> (n : Nat) -> Option (Prod State (List Out)) :=
+  fun (env : Env) (s : State) (n : Nat) =>
+    some (pair (makeState (fold (fun (acc : Nat) => natAdd acc 1) (count s) n)) nil)
