@@ -96,17 +96,16 @@ The type of a definition gives its role. There is no keyword for a role.
 
 `examples/contract.lang` has the state, `init`, the entries `deposit`, `withdraw` and `stamp`, the helper `checkpoint` and the view `balance`. `langc eval` prints a state in the constructor form, for example `makeState 0x00000000000000000000000000000000000000aa 0u 0u 0`. `langc abi` and `langc build` still stop with `langc: PLANNED: ...`.
 
-The history rule (slice K3c) makes sure that a call cannot make a history field less than before. `langc check` checks the rule on the core term of each definition, after it resolves the names. It does not check the body of `init` or of a definition with the type `State` after normalization, for example `initial` in `examples/state-aliases.lang`.
+The history rule (slice K3c) makes sure that a call cannot make a history field less than before. For a state with at least one history field, `langc check` checks the rule on the core term of each definition, after it resolves the names. It does not check the body of `init` or of a definition with the type `State` after normalization, for example `initial` in `examples/state-aliases.lang`. States without history fields do not need this rule.
 
 - Each use of the state constructor has all of its arguments.
 - The argument for a history field `F` is `F t` or `ADD (F t) e`. `ADD` is `u256Add` for a `U256` field and `natAdd` for a `Nat` field. `t` and `e` can be any terms of the correct type.
 - A definition with `State` in its type cannot refer to `init` or to a definition with the type `State`, because a return of one of them can put a history field back to its start value. A definition without `State` in its type can refer to them, for example `savedEarned` in `examples/state-aliases.lang`.
+- An open type variable is conservatively treated as possibly containing `State`. For example, `Sigma (A : Type 0) A` can package a state even though its written type does not name `State`, so it cannot hide a reference to `init` or another unchecked state definition.
 - The rule is strict. It refuses a literal (`0u`), a subtraction (`u256Sub (earned s) 1u`), the operands in the other order (`u256Add 1u (earned s)`), the constructor without all of its arguments (`makeState` alone), and a history value that goes through a `fun` binder. A binder with the name of a field, for example `fun (earned : U256) => ...`, is a local and not the field. A view with `State` in its type that refers to `init` or to a definition with the type `State` is also refused.
 - If a definition does not obey the rule, the checker gives `REFUSE_HISTORY_WRITE`.
 
-The checker treats unknown type variables conservatively as potentially containing `State`. This also prevents a dependent pair such as `Sigma (A : Type 0) A` from hiding a closed state in its payload.
-
-Why the rule is sound: each state in an entry comes from the input state, or from a constructor that keeps or adds to each history field of a state. A definition whose type cannot contain `State` cannot give a state to an entry. Thus each history field of the result is not less than the same field of the input. `u256Add` and `natAdd` trap on overflow, so a value cannot wrap. The test files are `test/check/history-*.lang`.
+Why the rule is sound: each state in an entry comes from the input state, or from a constructor that keeps or adds to each history field of a state. A definition without `State` in its type cannot give a state to an entry, because a program cannot declare a family that holds a state (rule R1). Thus each history field of the result is not less than the same field of the input. `u256Add` and `natAdd` trap on overflow, so a value cannot wrap. The test files are `test/check/history-*.lang`.
 
 `langc run PROG SCRIPT` checks the program `PROG`, gets the start state from `init`, and then does the calls in `SCRIPT` in sequence. Each line of a script is one call:
 

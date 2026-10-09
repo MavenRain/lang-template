@@ -1,0 +1,8 @@
+-- An existential payload can hide State from a scan of literal family names.
+state State := makeState history (earned : U256)
+def init : State := makeState 0u
+def boxed : Sigma (A : Type 0) A := pack State init
+def bump : Env -> State -> Option (Prod State (List Out)) :=
+  fun e s => some (pair (makeState (u256Add (earned s) 1u)) nil)
+def reset : Env -> State -> Option (Prod State (List Out)) :=
+  fun e s => some (pair (payload boxed) nil)

@@ -1452,10 +1452,24 @@ static int history_root(const Machine *m, uint32_t j) {
   return strcmp(m->defs[j].name, "init") == 0 || is_family(m->defs[j].type, m->state_family);
 }
 
+static int has_history(const Machine *m) {
+  const CtorInfo *ci;
+  uint32_t i;
+  if (!m->has_state)
+    return 0;
+  ci = &m->ctors[m->families[m->state_family].first_ctor];
+  for (i = 0; i < ci->field_count; i++) {
+    if (ci->fields[i].history)
+      return 1;
+  }
+  return 0;
+}
+
 /* 1 if the family State occurs in the type value V (USER ruling A). The
    codomain of a Pi or a Sigma opens at a fresh level, as conv_values does.
-   A Lam, a stuck operation or an unknown type variable gives 1. A Sigma
-   payload may instantiate an unknown type with State. */
+   A variable can stand for State, including the payload type of an
+   existential package. A Lam, a stuck operation or a value that does not
+   open also gives 1. */
 static int mentions_state(Machine *m, uint32_t level, const Value *v) {
   uint32_t i;
   if (v == NULL)
@@ -1466,8 +1480,6 @@ static int mentions_state(Machine *m, uint32_t level, const Value *v) {
   case VAL_TRAP:
   case VAL_UNIV:
     return 0;
-  case VAL_VAR:
-    return 1;
   case VAL_PI:
   case VAL_SIGMA:
     return mentions_state(m, level, v->dom) || mentions_state(m, level + 1u, closure_apply(m, v, val_var(m, level)));
@@ -1475,6 +1487,7 @@ static int mentions_state(Machine *m, uint32_t level, const Value *v) {
     return mentions_state(m, level, v->dom) || mentions_state(m, level, v->arg);
   case VAL_LAM:
   case VAL_STUCK:
+  case VAL_VAR:
     return 1;
   case VAL_OP:
     break;
@@ -1543,7 +1556,7 @@ static int check_def(Checker *c, const Decl *d) {
   DefInfo *info = &m->defs[m->def_count];
   if (body == NULL)
     return 0;
-  if (strcmp(d->name, "init") != 0 && !is_family(tv, m->state_family) && !history_ok(c, body, mentions_state(m, c->level, tv)))
+  if (has_history(m) && strcmp(d->name, "init") != 0 && !is_family(tv, m->state_family) && !history_ok(c, body, mentions_state(m, c->level, tv)))
     return 0;
   info->name = d->name;
   info->origin = d->origin;

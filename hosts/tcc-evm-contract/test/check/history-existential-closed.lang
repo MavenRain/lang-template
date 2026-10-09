@@ -1,0 +1,7 @@
+-- The same escape can hide any unchecked State definition, including aliases.
+state State := makeState history (earned : Nat)
+def Snapshot : Type 0 := State
+def zero : Snapshot := makeState 0
+def boxed : Sigma (A : Type 0) (List A) := pack State (cons zero nil)
+def reset : State -> State :=
+  fun s => fold (fun x acc => x) s (payload boxed)

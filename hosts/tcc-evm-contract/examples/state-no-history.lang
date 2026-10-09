@@ -1,0 +1,8 @@
+-- With no history fields, arbitrary state constructors and resets are valid.
+state State := makeState (count : Nat)
+def init : State := makeState 0
+def mk : Nat -> State := makeState
+def restore : State -> State := fun s => init
+def reset : Env -> State -> Option (Prod State (List Out)) :=
+  fun e s => some (pair (restore s) nil)
+def answer : Nat := count (restore (mk 7))

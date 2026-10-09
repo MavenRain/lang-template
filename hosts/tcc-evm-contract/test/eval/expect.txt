@@ -43,3 +43,4 @@ state-aliases savedHeld => 9u
 state-aliases savedCounts => pair (some 3) (cons 4 nil)
 state-aliases savedEarned => 11u
 state-aliases savedCursor => 7
+state-no-history answer => 0

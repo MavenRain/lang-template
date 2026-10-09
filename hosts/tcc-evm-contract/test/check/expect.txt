@@ -40,3 +40,5 @@ history-partial.lang REFUSE_HISTORY_WRITE
 history-shadow.lang REFUSE_HISTORY_WRITE
 history-closed.lang REFUSE_HISTORY_WRITE
 history-hidden.lang REFUSE_HISTORY_WRITE
+history-existential-init.lang REFUSE_HISTORY_WRITE
+history-existential-closed.lang REFUSE_HISTORY_WRITE
