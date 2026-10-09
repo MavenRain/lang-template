@@ -162,6 +162,10 @@ static int build_status(Machine *m, EvmBuild result) {
     case EVM_BUILD_WRITE: return diag_fail(m->diag, "IO_WRITE", NULL, "the code buffer write failed") + 2;
     case EVM_BUILD_IR:
       return diag_fail(m->diag, "REFUSE_LOWER", NULL, "an entry has an IR form that the EVM back end does not lower") + 1;
+    case EVM_BUILD_SIGNATURE:
+      return diag_fail(m->diag, "EVM_SIGNATURE", NULL, "the signature of an entry is longer than 255 bytes") + 1;
+    case EVM_BUILD_SELECTOR:
+      return diag_fail(m->diag, "EVM_SELECTOR", NULL, "two entries have the same four-byte ABI selector") + 1;
   }
   return 1;
 }

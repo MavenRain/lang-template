@@ -105,10 +105,13 @@ for prog in examples/contract.lang examples/map.lang examples/storage.lang; do
   fi
 done
 
-# The runtime of slice K4a is PUSH0 PUSH0 REVERT.
+# A program with no entry (slice K4b, C-K4b-1): the dispatcher head
+# (CALLVALUE, CALLDATASIZE < 4, selector), the shared empty REVERT block at
+# 0x12 and the shared Trap() REVERT block at 0x16.
+head=346100125760043610610012575f3560e01c5b5f5ffd5b63ae96083a60e01b5f5260045ffd
 checks=$((checks + 1))
-if [ "$(build/langc build examples/storage.lang --runtime)" != 5f5ffd ]; then
-  echo 'FAIL build --runtime: want 5f5ffd'
+if [ "$(build/langc build examples/storage.lang --runtime)" != "$head" ]; then
+  echo "FAIL build --runtime: want $head"
   fail=$((fail + 1))
 fi
 

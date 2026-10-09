@@ -48,6 +48,30 @@ int target_abi_line(const IrFunc *fn, FILE *out, FILE *err) {
   return 1;
 }
 
+/* The selector of FN (C-K4-11): the first 4 bytes of the keccak256 of its
+   signature, as a number. Returns 0 when the signature does not fit. */
+static int selector(const IrFunc *fn, uint64_t *out) {
+  char text[EVM_SIGNATURE];
+  unsigned char digest[32];
+  size_t size = signature(text, fn);
+  if (size == 0) return 0;
+  keccak256((const unsigned char *)text, size, digest);
+  *out = (uint64_t)digest[0] << 24 | (uint64_t)digest[1] << 16 | (uint64_t)digest[2] << 8 | digest[3];
+  return 1;
+}
+
+/* The number of low bits that a clean argument word can use (C-K4-6).
+   256 = all words are clean. */
+static unsigned scalar_bits(IrScalar s) {
+  switch (s) {
+  case IR_SCALAR_NAT: return 64;
+  case IR_SCALAR_FLAG: return 1;
+  case IR_SCALAR_U256: return 256;
+  case IR_SCALAR_ADDR: return 160;
+  }
+  return 256;
+}
+
 int target_write(const IrProgram *prog, TargetPart part, FILE *out, FILE *err) {
   (void)prog;
   (void)part;
@@ -146,6 +170,7 @@ static int emit_binary(Emit *e, const IrExpr *x) {
     asm_jump_if(a, e->trap);
     return 1;
   case IR_OP_KECCAK:
+    /* LEFT is on top, and the preimage is LEFT followed by RIGHT. */
     emit_store(a, e->scratch);
     emit_store(a, e->scratch + 32);
     asm_push(a, 64);
@@ -216,17 +241,62 @@ static int emit_block(Emit *e, IrBlock b) {
   return ok;
 }
 
-/* One block per entry at label FIRST + i, then the shared empty REVERT
-   block (C-K4-8) and the shared Trap() REVERT block (C-K4-9). The dispatcher
-   head and the decode come in K4b2. Returns 0 on an IR form that the EVM
-   back end does not lower (a heap block, a loop, a switch or a RETURN). */
-static int evm_entries(Asm *a, const IrProgram *prog, Label first) {
+/* Entry FN at label LABEL (C-K4b-1): pop the selector, revert on call data
+   shorter than 4 + 32 * N, store argument word k at local k after the
+   dirty-bit check (C-K4-6: a dirty word gives the empty REVERT), then the
+   body. Returns 0 on an IR form that the EVM back end does not lower. */
+static int evm_entry(Emit *e, const IrFunc *fn, Label label) {
+  Asm *a = e->a;
+  e->scratch = 32u * (uint64_t)fn->local_count;
+  asm_jumpdest(a, label);
+  asm_op(a, EVM_OP_POP);
+  asm_push(a, 4u + 32u * (uint64_t)fn->param_count);
+  emit_ops(a, (const Op[]){EVM_OP_CALLDATASIZE, EVM_OP_LT}, 2);
+  asm_jump_if(a, e->revert);
+  for (size_t k = 0; k < fn->param_count; k++) {
+    unsigned bits = scalar_bits(fn->params[k]);
+    asm_push(a, 4u + 32u * (uint64_t)k);
+    asm_op(a, EVM_OP_CALLDATALOAD);
+    if (bits < 256) {
+      asm_op(a, EVM_OP_DUP1);
+      asm_push(a, bits);
+      asm_op(a, EVM_OP_SHR);
+      asm_jump_if(a, e->revert);
+    }
+    emit_store(a, 32u * (uint64_t)k);
+  }
+  return emit_block(e, fn->body);
+}
+
+/* The runtime (C-K4b-1, C-K4b-4: entries only). The dispatcher head reverts
+   on a call value or on call data shorter than 4 bytes (C-K4-11), puts the
+   selector on the stack and jumps to entry i at label FIRST + i on a match.
+   An unknown selector falls through to the shared empty REVERT block
+   (C-K4-8). The shared Trap() REVERT block (C-K4-9) and the entries come
+   after it. */
+static EvmBuild evm_runtime(Asm *a, const IrProgram *prog, Label first) {
+  uint64_t hits[ASM_LABELS];
+  if (prog->func_count > ASM_LABELS) return EVM_BUILD_SIZE;
+  for (size_t i = 0; i < prog->func_count; i++) {
+    if (!selector(&prog->funcs[i], &hits[i])) return EVM_BUILD_SIGNATURE;
+    for (size_t j = 0; j < i; j++)
+      if (hits[j] == hits[i]) return EVM_BUILD_SELECTOR;
+  }
   Emit e = {a, 0, asm_label(a), asm_label(a)};
-  int ok = 1;
-  for (size_t i = 0; ok && i < prog->func_count; i++) {
-    e.scratch = 32u * (uint64_t)prog->funcs[i].local_count;
-    asm_jumpdest(a, first + (Label)i);
-    ok = emit_block(&e, prog->funcs[i].body);
+  asm_op(a, EVM_OP_CALLVALUE);
+  asm_jump_if(a, e.revert);
+  asm_push(a, 4);
+  emit_ops(a, (const Op[]){EVM_OP_CALLDATASIZE, EVM_OP_LT}, 2);
+  asm_jump_if(a, e.revert);
+  asm_push(a, 0);
+  asm_op(a, EVM_OP_CALLDATALOAD);
+  asm_push(a, 224);
+  asm_op(a, EVM_OP_SHR);
+  for (size_t i = 0; i < prog->func_count; i++) {
+    asm_op(a, EVM_OP_DUP1);
+    asm_push(a, hits[i]);
+    asm_op(a, EVM_OP_EQ);
+    asm_jump_if(a, first + (Label)i);
   }
   asm_jumpdest(a, e.revert);
   emit_ops(a, (const Op[]){EVM_OP_PUSH0, EVM_OP_PUSH0, EVM_OP_REVERT}, 3);
@@ -236,7 +306,9 @@ static int evm_entries(Asm *a, const IrProgram *prog, Label first) {
   emit_ops(a, (const Op[]){EVM_OP_SHL, EVM_OP_PUSH0, EVM_OP_MSTORE}, 3);
   asm_push(a, 4);
   emit_ops(a, (const Op[]){EVM_OP_PUSH0, EVM_OP_REVERT}, 2);
-  return ok;
+  int ok = 1;
+  for (size_t i = 0; ok && i < prog->func_count; i++) ok = evm_entry(&e, &prog->funcs[i], first + (Label)i);
+  return ok ? EVM_BUILD_OK : EVM_BUILD_IR;
 }
 
 static int is_zero(const unsigned char *w) {
@@ -249,32 +321,29 @@ static int is_zero(const unsigned char *w) {
    diagnostic from the return code. */
 EvmBuild evm_build(const IrProgram *prog, const unsigned char (*pairs)[64], size_t count, TargetPart part,
                    FILE *out) {
-  Asm *a = calloc(4, sizeof(Asm));
+  Asm *a = calloc(3, sizeof(Asm));
   FILE *sink = fopen("/dev/null", "w");
   if (a == NULL || sink == NULL) {
     free(a);
     if (sink != NULL) fclose(sink);
     return EVM_BUILD_OOM;
   }
-  Asm *stores = &a[0], *runtime = &a[1], *code = &a[2], *entries = &a[3];
-  Label first = prog->func_count > 0 ? asm_label(entries) : 0;
-  for (size_t i = 1; i < prog->func_count; i++) asm_label(entries);
-  if (!evm_entries(entries, prog, first)) {
+  Asm *stores = &a[0], *runtime = &a[1], *code = &a[2];
+  Label first = prog->func_count > 0 ? asm_label(runtime) : 0;
+  for (size_t i = 1; i < prog->func_count; i++) asm_label(runtime);
+  EvmBuild built = evm_runtime(runtime, prog, first);
+  if (built != EVM_BUILD_OK) {
     fclose(sink);
     free(a);
-    return EVM_BUILD_IR;
+    return built;
   }
-  /* The K4a runtime stays until the dispatcher lands (K4b2). */
-  asm_op(runtime, EVM_OP_PUSH0);
-  asm_op(runtime, EVM_OP_PUSH0);
-  asm_op(runtime, EVM_OP_REVERT);
   for (size_t i = 0; part != TARGET_PART_RUNTIME && i < count; i++) {
     if (is_zero(pairs[i] + 32)) continue;
     asm_push_word(stores, pairs[i] + 32);
     asm_push_word(stores, pairs[i]);
     asm_op(stores, EVM_OP_SSTORE);
   }
-  EvmBuild result = stores->full || !asm_finish(entries, sink) || !asm_finish(runtime, sink)
+  EvmBuild result = stores->full || !asm_finish(runtime, sink) || runtime->size > ASM_RUNTIME_MAX
                         || (part != TARGET_PART_RUNTIME && !asm_creation_store(code, stores, runtime, sink))
                         ? EVM_BUILD_SIZE
                     : asm_write_hex(part == TARGET_PART_RUNTIME ? runtime : code, out, sink) ? EVM_BUILD_OK

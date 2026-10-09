@@ -105,6 +105,10 @@ kit-owned files, including this README and `docs/CAPABILITY.md`, which
 are maintained separately. The refresh adds amendment and dispute
 examples, guarded EVM entries and their chain tests.
 
+SPEC cites (M7, 2026-10-09): each "SPEC section N" in this kit is a
+section of the anchor-lang `SPEC.md` at commit `211dc59`. Choice a keeps
+that file out of the kit.
+
 ## Renames
 
 The initial port copied each file from `248705e` and changed only the names below.
@@ -157,5 +161,3 @@ The USER ruled the host name, the faithful port, the scan excludes
 - The domain entries are in `src/evm.c`. The tcc-evm-dao split
   (`src/asm.h` for the writer API and `domain/entries.c` for the entries)
   is not done.
-- The source comments and `docs/CAPABILITY.md` cite sections of the
-  anchor-lang SPEC.md, which is not in the kit.

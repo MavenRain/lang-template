@@ -1,9 +1,13 @@
-# anchor-lang host capability: TinyCC to EVM (M6 done, chunk 14, 2026-10-09)
+# anchor-lang host capability: TinyCC to EVM (M7 done, chunk 19, 2026-10-09)
 
-This file records what the `tcc-evm` host can do at the end of chunk 14
+This file records what the `tcc-evm` host can do at the end of chunk 19
 (SPEC section 10). The host is the C99 compiler `langc`, built by
 TinyCC. The target is EVM bytecode for one contract. Each fact cites a file
 or a test. PLANNED work has no evidence yet.
+
+Each "SPEC section N" in this kit is a section of the anchor-lang
+`SPEC.md` at commit `211dc59`. That file is not in the kit (README
+`## Origin`).
 
 ## Compiler
 
@@ -45,9 +49,15 @@ or a test. PLANNED work has no evidence yet.
 - A program has at most 8 constitutions (`AMEND_LIMIT`,
   `examples/mutants/amend-limit.lang`). With C constitutions and R
   tallies, a table has at most 4096 rows, C R (`TABLE_LIMIT`,
-  `test/table.sh`). A constitution k >= 1 tabulates only while the
-  evaluation of a profile of M ballots stays under `CHECK_DEPTH` = 4096
-  nested calls, else `TYPE_FUEL` (SPEC section 7).
+  `test/table.sh`). A constitution k >= 1 that is not the value of
+  `constitutionOf r` (the general path) builds a profile of M ballots
+  for each row. With 2 candidates, 282 members tabulate
+  (`test/table-general-282.lang`). From 283 to 815 members, the arena is
+  full (`MEMORY`, `test/table-general-283.lang`). With 816 members and
+  more, the evaluation goes past `CHECK_DEPTH` = 4096 nested calls
+  (`TYPE_FUEL`). The short path of `constitutionOf r` builds no profile
+  and tabulates up to `TABLE_LIMIT` (`test/table-amend-2047.lang`; SPEC
+  section 7).
 - Universes: `Type 0` has the type `Type 1`, and `Type 1` has no type
   (`TYPE_UNIVERSE`). An explicit `Type 1` annotation is refused. Pi,
   Sigma, product and sum formation take the maximum universe of their
@@ -124,21 +134,28 @@ tabulates every constitution and makes the full fork check.
 
 ## Planned
 
-M6 is done (SPEC section 10, chunks 9 to 14). Chunks 10 to 12 add
-compile-time constitutions, a guarded `amend(uint256)` entry and chain
-tests (O3). Chunk 13 adds a `dispute(bytes32,uint256,bytes32)` entry
-that writes no storage (O7). Chunk 14 ports those changes into this kit.
-`HashDom` stays `nonZero` only (O4, SPEC section 9). Nothing is planned
-after M6.
+M6 is done (SPEC section 10, chunks 9 to 14): the `amend` entry (O3), the
+`dispute` entry (O7) and a port of those changes into this kit.
+
+M7 is done (SPEC section 10, chunks 15 to 19). Chunk 15 adds the short
+path of `constitutionOf r`. Chunk 16 gives the measured cause of the limit
+of the general path, with pins at 282 and 283 members (see `## Limits`).
+Chunk 17 adds a counted skip to the 4 chain test files. Chunk 18 ports M7
+into this kit. Chunk 19 corrects the text of this file and of the kit
+README. The limit of SPEC section 7 is final.
+Nothing is planned after M7.
 
 ## Gates (2026-10-09)
 
-All GREEN on the chunk 14 kit:
+All GREEN on the chunk 19 kit:
 
 - `make build` (tcc `-Wall -Werror`).
 - `make check-clang`.
 - `make check`: `test/gate.sh` runs the ten test scripts. Their case
-  counts are listed in the README: 412 cases in all, including six
+  counts are listed in the README: 417 cases in all, including six
   differential traces and the amendment and dispute laws. The four
-  chain test files run on geth `evm` 1.14.12. The last line is
+  chain test files run on geth `evm` 1.14.12. The summary line is
   `gate: 0 failures`.
+- The skip sum (`gate: skip sum N cases`, after the summary line): 0 with
+  `evm`, and 193 with no `evm` on PATH (55, 17, 81 and 40 cases in the
+  four chain test files).
