@@ -151,9 +151,9 @@ class GeneratorTests(unittest.TestCase):
                          'static const char LANG_NAME[] = "example-lang";\n')
         self.assertIn(": make check\n", result.stdout)
 
-    def test_tcc_wasm_tcc_evm_and_tcc_evm_dao_hosts(self):
+    def test_tcc_wasm_tcc_evm_tcc_evm_dao_and_tcc_evm_anchor_hosts(self):
         for host, target in (("tcc-wasm", "src/wasm.c"), ("tcc-evm", "src/evm.c"),
-                             ("tcc-evm-dao", "src/evm.c")):
+                             ("tcc-evm-dao", "src/evm.c"), ("tcc-evm-anchor", "src/evm.c")):
             with self.subTest(host=host):
                 kit = self.template / "hosts" / host
                 (kit / "src").mkdir(parents=True)
@@ -233,8 +233,8 @@ class HostListTests(unittest.TestCase):
         self.assertEqual(head.split(", ") + [last], self.hosts())
 
     def test_docs_list_exactly_the_hosts(self):
-        # README.md and the formers matrix name the hosts by hand. The matrix
-        # keeps its own column order, so the test compares it as a set.
+        # README.md and the formers matrix name the hosts by hand, in the
+        # order of the hosts array.
         hosts = self.hosts()
         readme = (ROOT / "README.md").read_text()
         table = re.findall(r"^\| ([a-z][a-z0-9-]*) \| .* \| \[`hosts/\1/README\.md`\]",
@@ -250,8 +250,7 @@ class HostListTests(unittest.TestCase):
                             (ROOT / "formers/FORMERS.md").read_text(), re.MULTILINE)
         self.assertEqual(len(header), 1, header)
         columns = [cell.split(" (")[0] for cell in header[0].split(" | ")]
-        self.assertEqual(len(columns), len(set(columns)), columns)
-        self.assertEqual(sorted(columns), sorted(hosts))
+        self.assertEqual(columns, hosts)
 
 
 class TccKitTests(unittest.TestCase):
@@ -278,6 +277,9 @@ class TccKitTests(unittest.TestCase):
 
     def test_tcc_evm_dao_language_passes_its_gate(self):
         self.generate_and_check("tcc-evm-dao", "src/evm.c")
+
+    def test_tcc_evm_anchor_language_passes_its_gate(self):
+        self.generate_and_check("tcc-evm-anchor", "src/evm.c")
 
 
 @unittest.skipUnless(sys.platform == "darwin", "guard uses macOS libproc")

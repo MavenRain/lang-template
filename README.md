@@ -34,6 +34,7 @@ Choose the host by the target.
 | tcc-wasm | A Wasm module with one `i64` export for each entry | `build/langc` (TinyCC) | [`hosts/tcc-wasm/README.md`](hosts/tcc-wasm/README.md) |
 | tcc-evm | EVM bytecode with one ABI `uint256` function for each entry | `build/langc` (TinyCC) | [`hosts/tcc-evm/README.md`](hosts/tcc-evm/README.md) |
 | tcc-evm-dao | EVM bytecode for a self-constituting DAO, with the verdict table in the contract | `build/langc` (TinyCC) | [`hosts/tcc-evm-dao/README.md`](hosts/tcc-evm-dao/README.md) |
+| tcc-evm-anchor | EVM bytecode for one governed log of hash and time pairs, with the outcome table in the contract | `build/langc` (TinyCC) | [`hosts/tcc-evm-anchor/README.md`](hosts/tcc-evm-anchor/README.md) |
 
 The realization matrix in `formers/FORMERS.md` section 5 gives the status of
 each former on each host. Read it before you choose. For example, assay
@@ -48,7 +49,7 @@ bin/new-lang.sh NAME HOST [DEST]
 
 - `NAME` is the language name. It must match `^[a-z][a-z0-9-]*$`.
   The `tcc-json` host reserves `instances` for its JSON document key.
-- `HOST` is `mech`, `assay`, `tcc-json`, `tcc-evm-contract`, `tcc-wasm`, `tcc-evm` or `tcc-evm-dao`.
+- `HOST` is `mech`, `assay`, `tcc-json`, `tcc-evm-contract`, `tcc-wasm`, `tcc-evm`, `tcc-evm-dao` or `tcc-evm-anchor`.
 - `DEST` is the new directory. The default is `../NAME` beside the template
   root. The script refuses a `DEST` that exists.
 
@@ -89,7 +90,7 @@ replaces `{{LANG}}` with `NAME` and `{{HOST}}` with `HOST`. It runs
 | `docs/STATUS.template.md`, `docs/VALIDATION.template.md` | The status and validation forms |
 | `bin/new-lang.sh` | Makes a new language |
 | `bin/doc-check.pl` | The check behind `make doc-check` |
-| `hosts/mech/`, `hosts/assay/`, `hosts/tcc-json/`, `hosts/tcc-evm-contract/`, `hosts/tcc-wasm/`, `hosts/tcc-evm/`, `hosts/tcc-evm-dao/` | The host kits |
+| `hosts/mech/`, `hosts/assay/`, `hosts/tcc-json/`, `hosts/tcc-evm-contract/`, `hosts/tcc-wasm/`, `hosts/tcc-evm/`, `hosts/tcc-evm-dao/`, `hosts/tcc-evm-anchor/` | The host kits |
 
 ## Gates
 
@@ -97,10 +98,10 @@ replaces `{{LANG}}` with `NAME` and `{{HOST}}` with `HOST`. It runs
   gate of each host kit that is present. It also checks that
   `hosts/tcc-wasm` and `hosts/tcc-evm` have the same shared files. The probe
   guard tests need macOS, as does `probe/guard.py` itself.
-- `make test` runs the tool regression tests with Python 3. Three of these
-  tests make a language from `hosts/tcc-wasm`, `hosts/tcc-evm` and
-  `hosts/tcc-evm-dao` and run its gate, so they need the tools that the kit
-  READMEs list.
+- `make test` runs the tool regression tests with Python 3. Four of these
+  tests make a language from `hosts/tcc-wasm`, `hosts/tcc-evm`,
+  `hosts/tcc-evm-dao` and `hosts/tcc-evm-anchor` and run its gate, so they
+  need the tools that the kit READMEs list.
 - `make doc-check` fails on an em-dash or an en-dash in a Markdown file, and
   on a placeholder other than `{{LANG}}` and `{{HOST}}`.
 
