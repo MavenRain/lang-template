@@ -7,7 +7,7 @@ The TinyCC host kit of retainer-lang. It compiles the contract language to EVM b
 - The front end, `src/main.c`, `src/ir.h`, `src/target.h`, `gen/`, `domain/`, `examples/` and `test/gate.sh` are copies of `hosts/tcc-wasm`. The SHA-256 of each source file is in `lang-template-work/tcc-evm-contract-snapshot.txt`, with a list of the changes.
 - `src/asm.c` and `src/asm.h` come from the escrowc assembler (escrow-lang `src/evm.c`). The labels are numbers, not a fixed enum.
 - `src/keccak.c` and `src/keccak.h` are copies of the escrowc files. Only the names are changed.
-- `src/evm.c` is the EVM target. It writes the ABI selectors and the code of `langc build` (`evm_build` in `src/evm.h`). `src/lower.c` gives it the storage words of `init` (slice K4a). The dispatch, the logs and the calls come in slices K4b to K4d.
+- `src/evm.c` is the EVM target. It writes the ABI selectors and the code of `langc build` (`evm_build` in `src/evm.h`). `src/lower.c` gives it the storage words of `init` (slice K4a) and the IR of each entry (slice K4b). The views, the logs and the calls come in slices K4c and K4d.
 
 ## Slices
 
@@ -21,7 +21,8 @@ The TinyCC host kit of retainer-lang. It compiles the contract language to EVM b
 | K4a0 | Map former (front end) | Done |
 | K4a1 | Named events (front end) | Done |
 | K4a | Build output and storage layout | Done |
-| K4 to K5 | See the retainer-lang brief | Planned |
+| K4b | Entries, dispatch and call data decode | Done |
+| K4c to K5 | See the retainer-lang brief | Planned |
 
 
 ## U256 and Addr (slice K2)
@@ -53,7 +54,7 @@ Prelude names:
 | `toU256` | `Nat -> U256` | The same number as a U256. This is the only conversion. |
 | `addrEq` | `Addr -> Addr -> Flag` | `flagYes` when the two addresses are equal. |
 
-The helpers are in `src/front/u256.c`. They use no `__int128` and no shift by 64 or more. `examples/words.lang` has the laws and the eval cases. The storage form of these types is in `## EVM output (slice K4)`. The IR scalars for U256 and Addr come in slice K4b.
+The helpers are in `src/front/u256.c`. They use no `__int128` and no shift by 64 or more. `examples/words.lang` has the laws and the eval cases. The storage form of these types is in `## EVM output (slice K4)`. In slice K4b, the IR word is the 256-bit EVM word, and each IR scalar (Nat, Flag, U256, Addr) keeps the range of its type.
 
 ## Contracts (slice K3)
 
@@ -98,7 +99,7 @@ The type of a definition gives its role. There is no keyword for a role.
 
 `langc check` and `langc eval` do not find the role of a definition. For them, `init` is a normal definition, but the history rule of `langc check` (slice K3c) does not check the body of `init` and refuses a reference to `init` from a definition with `State` in its type. `langc run` finds the roles and the start state (slice K3b).
 
-`examples/contract.lang` has the state, `init`, the entries `deposit`, `withdraw` and `stamp`, the helper `checkpoint` and the view `balance`. `langc eval` prints a state in the constructor form, for example `makeState 0x00000000000000000000000000000000000000aa 0u 0u 0`. `langc abi` and `langc build` still stop with `langc: PLANNED: ...`.
+`examples/contract.lang` has the state, `init`, the entries `deposit`, `withdraw` and `stamp`, the helper `checkpoint` and the view `balance`. `langc eval` prints a state in the constructor form, for example `makeState 0x00000000000000000000000000000000000000aa 0u 0u 0`. `langc build` writes the EVM code (refer to `## EVM output (slice K4)`). `langc abi` still stops with `langc: PLANNED: ...` (slice K4c).
 
 The history rule (slice K3c) makes sure that a call cannot make a history field less than before. For a state with at least one history field, `langc check` checks the rule on the core term of each definition, after it resolves the names. It does not check the body of `init` or of a definition with the type `State` after normalization, for example `initial` in `examples/state-aliases.lang`. States without history fields do not need this rule.
 
@@ -202,10 +203,11 @@ state makeState 7u
 
 ## EVM output (slice K4)
 
-Slice K4a writes the creation code of a contract. `src/lower.c` walks the state of `init` and makes a list of (slot, value) words. `evm_build` in `src/evm.c` makes the code from that list. `src/evm.h` has no front-end type.
+Slice K4a writes the creation code of a contract. Slice K4b writes the runtime: the dispatcher and one block for each entry. `src/lower.c` walks the state of `init` and makes a list of (slot, value) words. It also lowers the body of each entry from Core to IR (`src/ir.h`). `evm_build` in `src/evm.c` makes the code from the words and the IR. `src/evm.h` has no front-end type.
 
 - `langc build` evaluates `init` with the evaluator of `langc eval`. The creation code has PUSH value, PUSH slot, SSTORE for each word that is not zero. Then it copies the runtime and returns it.
-- The runtime of slice K4a is PUSH0 PUSH0 REVERT (`5f5ffd`). The dispatch comes in slice K4b.
+- The runtime has the dispatcher, then one shared REVERT block with empty data, then the shared `Trap()` block, then one block for each entry.
+- A contract with no entry has a runtime of 37 bytes: the dispatcher head, the REVERT block and the `Trap()` block. Each call to it reverts with empty data.
 
 Storage layout:
 
@@ -214,25 +216,57 @@ Storage layout:
 - A `List T` field at slot s (T is a word type): the length is at slot s. Element j is at slot keccak256(s) + j.
 - A `Map K V` field at slot s (K and V are word types): the value at key k is at slot keccak256(k . s). k and s are 32-byte big-endian words. A key that is not in the map reads as zero.
 
+Dispatch (slice K4b):
+
+- All entries are nonpayable. A call with a value (CALLVALUE not zero) reverts with empty data.
+- Call data shorter than 4 bytes reverts with empty data.
+- The selector is CALLDATALOAD(0) shifted right by 224 bits. The dispatcher compares it with the selector of each entry (DUP1, PUSH4, EQ, JUMPI). An unknown selector goes into the REVERT block and reverts with empty data.
+- The selector of an entry is the first 4 bytes of the keccak256 of its signature `name(t1,...,tn)`. The ABI type names are: Nat is `uint64`, Flag is `bool`, U256 is `uint256` and Addr is `address`.
+- The views are not in the dispatcher. A call to a view reverts as an unknown selector. Slice K4c adds the views.
+
+Decode (slice K4b):
+
+- The entry block removes the selector from the stack. Then it checks the size: call data shorter than 4 + 32 * N bytes (N arguments) reverts with empty data.
+- Argument k is the word at byte 4 + 32 * k of the call data. The block puts it in memory at byte 32 * k.
+- Dirty-bit rule: a Nat argument must be less than 2^64, a Flag argument must be 0 or 1, and an Addr argument must be less than 2^160. When a high bit is set, the call reverts with empty data. A U256 argument has no check.
+
+Entry body (slice K4b):
+
+- `none` reverts with empty data.
+- A trap reverts with the 4 bytes of the `Trap()` selector, `0xae96083a`.
+- `some (pair STATE OUT)` writes each changed word field and each Map write with SSTORE. Then the block stops (STOP).
+- The runtime drops the OUT part and writes no LOG. Slice K4c adds the logs.
+- `src/lower.c` lowers the first-order word part of the body: Nat, Flag, U256 and Addr values, Option, Prod and `if`. Each op gives the result of the evaluator: Nat add and mul use the K2 u64 rules; U256 add and mul trap on overflow, sub stops at 0, and div rounds down and traps on 0.
+
 Output:
 
 - One line of lowercase hex, with no `0x` and a newline at the end. It goes to stdout, or to OUT with `-o OUT`.
-- `--runtime` writes only the runtime bytes, even when the initialization code exceeds the creation size limit.
+- `--runtime` writes only the runtime bytes. It does not apply the creation code limit (EIP-3860, 49152 bytes). The runtime limit (EIP-170, 24576 bytes) applies to the two output modes.
 - The output goes into a temporary buffer first. A refused build writes nothing on stdout, keeps an existing OUT and makes no new OUT.
 - Exit 0: the build is correct. Exit 1: `langc: REFUSE_LOWER: ...` or another refusal. Exit 2: `langc: IO_WRITE: -: stdout: ...` when a write fails.
 
 REFUSE_LOWER refuses a state that has no storage form in slice K4a: an Option field, a Prod field, a List of a type that is not a word, a nested List, a Map with a key or a value that is not a word, an `init` with arguments, and a program with no state or no `init`. `langc check` refuses a Map with a List value first (REFUSE_MAP).
 
+REFUSE_LOWER also refuses an entry body that slice K4b does not lower: a write of a List field (`test/lower/list-write.lang`), a `fold` at a word position (`test/lower/nat-fold.lang`), and each other residual that is not first-order word code. A def with the type of an entry and an argument that is not a word is a helper, not an entry: it is not in the dispatcher.
+
+The other refusals of `langc build` (exit 1, no output):
+
+- `langc: EVM_SIGNATURE: ...`: the signature of an entry is longer than 255 bytes.
+- `langc: EVM_SELECTOR: ...`: two entries have the same 4-byte selector.
+- `langc: EVM_SIZE: ...`: the creation code is longer than the EIP-3860 limit, or the runtime is longer than the EIP-170 limit.
+
 `test/build.sh` builds `examples/contract.lang`, `examples/map.lang` and `examples/storage.lang`, runs each code with `evm run --create --dump` and compares each storage slot with `langc eval PROG init`. `build/slottool HEX` computes the keccak256 slots. The script also runs the rows of `test/lower/expect.txt` and the output cases.
 
-`build/buildtool` checks runtime extraction when creation code is oversized and verifies IO_WRITE with exit 2 for a closed stdout pipe.
+`test/dispatch.sh` builds `examples/residuals.lang` and does 16 calls with geth `evm run`: empty call data, a short selector, an unknown selector, a call value (and a control call with no value), `none`, a trap, a caller that is not the owner, short call data, dirty Nat bits, Nat 2^64 - 1, and the storage after an entry. The selectors and the Map slots come from the SHA3 op of `evm`, not from `langc`.
+
+`build/buildtool` checks the 37-byte runtime of a contract with no entry, the EIP-170 runtime limit in the two output modes, the EVM_SELECTOR refusal (before any output) and IO_WRITE with exit 2 for a closed stdout pipe.
 
 ## Commands
 
-- `make check`: the tcc build with `-Wall -Werror`, the clang syntax pass, `test/gate.sh`, `test/run.sh` and `test/asm.sh`. `test/asm.sh` needs geth `evm` on PATH.
+- `make check`: the tcc build with `-Wall -Werror`, the clang syntax pass, `test/gate.sh`, `test/run.sh`, `test/asm.sh`, `test/build.sh` and `test/dispatch.sh`. `test/asm.sh`, `test/build.sh` and `test/dispatch.sh` need geth `evm` on PATH.
 - `build/langc check FILE` and `build/langc eval FILE`: as in tcc-wasm.
 - `build/langc run PROG SCRIPT`: does the calls in `SCRIPT` on the program `PROG`. Refer to `## Contracts (slice K3)`. `test/run.sh` runs each `test/run/NAME.script` on `examples/contract.lang` and compares the output with `test/run/NAME.out`. It also has 8 refusal rows and a usage row. `build/runtool` checks fresh fuel for initialization and call classification.
-- `build/langc build FILE [-o OUT] [--runtime]` writes the creation code (with `--runtime`, the runtime code) as one line of lowercase hex. Refer to `## EVM output (slice K4)`.
+- `build/langc build FILE [-o OUT] [--runtime]` writes the creation code (with `--runtime`, the runtime code: the dispatcher and the entry blocks) as one line of lowercase hex. Refer to `## EVM output (slice K4)`.
 - `build/asmtool`: the assembler self-test. `build/asmtool runtime|creation|abi` writes the test program or its ABI line.
 
 The tool versions and the test path for K4 are in `docs/CAPABILITY.md`.
