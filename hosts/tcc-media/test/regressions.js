@@ -59,7 +59,10 @@ function domainCompiler(text) {
   }
   tcc(['-run', 'gen/embed.c', domain, embedded]);
   const front = ['base', 'lexer', 'parser', 'front', 'eval', 'check'].map(n => `src/front/${n}.c`);
-  tcc(['-std=c99', '-Wall', '-Werror', '-Isrc', '-o', exe, 'src/main.c', ...front, 'src/json.c', embedded]);
+  // The media back end links the libav* of the FFmpeg pin (the Makefile passes its flags).
+  const words = name => (process.env[name] || '').split(/\s+/).filter(Boolean);
+  tcc(['-std=c99', '-Wall', '-Werror', '-Isrc', ...words('FFMPEG_CFLAGS'), '-o', exe, 'src/main.c', ...front,
+    'src/json.c', 'src/media.c', embedded, ...words('FFMPEG_LDLIBS')]);
   return exe;
 }
 

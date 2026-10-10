@@ -6,19 +6,21 @@
 #include "front/check.h"
 #include "front/front.h"
 #include "json.h"
+#include "media.h"
 
 #define ARENA_LIMIT_BYTES ((size_t)1 << 30)
 
 typedef enum {
   CMD_CHECK,
   CMD_EVAL,
-  CMD_BUILD
+  CMD_BUILD,
+  CMD_FFMPEG
 } Command;
 
 typedef struct {
   Command command;
   const char *prog_path;
-  const char *entry;
+  const char *entry; /* BUILD: NULL for the JSON document */
   char **args;
   int arg_count;
   const char *out_path; /* NULL: stdout */
@@ -31,12 +33,15 @@ static const struct {
   {"check", CMD_CHECK},
   {"eval", CMD_EVAL},
   {"build", CMD_BUILD},
+  {"ffmpeg", CMD_FFMPEG},
 };
 
 static int usage(FILE *err) {
   fputs("usage: langc check PROG\n"
         "       langc eval PROG NAME [ARGS...]\n"
-        "       langc build PROG [-o OUT]\n", err);
+        "       langc build PROG [-o OUT]\n"
+        "       langc build PROG MAIN IN... -o OUT\n"
+        "       langc ffmpeg PROG MAIN IN... -o OUT\n", err);
   return 2;
 }
 
@@ -50,13 +55,25 @@ static int find_command(const char *word, Command *out) {
   return 0;
 }
 
+/* PROG MAIN IN... -o OUT: the media verbs (video-lang O-1). */
+static int parse_media_options(int argc, char **argv, Options *opt, Diag *diag) {
+  if (argc < 6 || strcmp(argv[argc - 2], "-o") != 0)
+    return diag_fail(diag, "USAGE", NULL, "%s takes PROG MAIN IN... -o OUT", argv[1]);
+  opt->entry = argv[3];
+  opt->args = argv + 4;
+  opt->arg_count = argc - 6;
+  opt->out_path = argv[argc - 1];
+  return 1;
+}
+
 static int parse_build_options(int argc, char **argv, Options *opt, Diag *diag) {
   if (argc == 3) return 1;
   if (argc == 5 && strcmp(argv[3], "-o") == 0) {
     opt->out_path = argv[4];
     return 1;
   }
-  return diag_fail(diag, "USAGE", NULL, "build takes PROG and an optional -o OUT");
+  if (argc >= 6) return parse_media_options(argc, argv, opt, diag);
+  return diag_fail(diag, "USAGE", NULL, "build takes PROG and an optional -o OUT, or PROG MAIN IN... -o OUT");
 }
 
 static int parse_options(int argc, char **argv, Options *opt, Diag *diag) {
@@ -76,6 +93,8 @@ static int parse_options(int argc, char **argv, Options *opt, Diag *diag) {
       return 1;
     case CMD_BUILD:
       return parse_build_options(argc, argv, opt, diag);
+    case CMD_FFMPEG:
+      return parse_media_options(argc, argv, opt, diag);
   }
   return 0;
 }
@@ -119,11 +138,15 @@ static int run(const Options *opt, Arena *arena, Diag *diag) {
     case CMD_EVAL:
       return eval_command(&machine, opt->entry, opt->args, opt->arg_count, stdout, stderr);
     case CMD_BUILD: {
+      if (opt->entry != NULL)
+        return media_build(&machine, opt->entry, opt->args, opt->arg_count, opt->out_path);
       const char *doc = NULL;
       size_t doc_len = 0;
       if (!json_document(&machine, &doc, &doc_len)) return 1;
       return write_output(opt->out_path, doc, doc_len, diag) ? 0 : 2;
     }
+    case CMD_FFMPEG:
+      return media_ffmpeg(&machine, opt->entry, opt->args, opt->arg_count, opt->out_path, stdout);
   }
   return 1;
 }

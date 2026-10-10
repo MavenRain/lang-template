@@ -22,7 +22,7 @@ The TinyCC host kit of retainer-lang. It compiles the contract language to EVM b
 | K4a1 | Named events (front end) | Done |
 | K4a | Build output and storage layout | Done |
 | K4b | Entries, dispatch and call data decode | Done |
-| K4c | EVM views and logs | In progress |
+| K4c | EVM views, logs, ABI and List writes | Done |
 | K4d to K5 | See the retainer-lang brief | Planned |
 
 

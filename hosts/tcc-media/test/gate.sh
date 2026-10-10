@@ -132,6 +132,73 @@ status=0
 build/langc build examples/formers.lang -x 2>/dev/null >/dev/null || status=$?
 [ "$status" -eq 2 ] || { echo "FAIL build usage: want exit 2, got $status"; fail=$((fail + 1)); }
 
+# Media (video-lang K0). The pin makes the fixtures at each run; they are never
+# committed: av.mp4 (video and audio), v.mp4 (no audio), vfr.mp4 (one dropped
+# frame, so no constant frame rate).
+kit=$(pwd)
+media="$tmp/media"
+mkdir -p "$media"
+ff() { "$FFMPEG" -nostdin -loglevel error -y "$@"; }
+fm() { "$FFMPEG" -nostdin -loglevel error -i "$1" -map 0 -f framemd5 -; }
+src=testsrc2=size=320x240:rate=25:duration=2
+(cd "$media" &&
+  ff -f lavfi -i "$src" -f lavfi -i sine=frequency=440:duration=2 -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest av.mp4 &&
+  ff -f lavfi -i "$src" -c:v libx264 -pix_fmt yuv420p v.mp4 &&
+  ff -f lavfi -i "$src" -vf "select='not(eq(n,5))'" -fps_mode passthrough -c:v libx264 -pix_fmt yuv420p vfr.mp4) \
+  || { echo "FAIL media: the pin did not make the fixtures"; fail=$((fail + 1)); }
+set -f
+
+# Each line of test/media/expect.txt is `NAME FRAMES PROG MAIN IN...`. The
+# ffmpeg verb must print test/ffmpeg/NAME.cmd, and the pin runs that argv to
+# make REF. OURS (langc build) must have FRAMES video frames and the framemd5
+# lines of REF for every stream (R1).
+while read -r name frames prog entry inputs; do
+  (cd "$media" && rm -f ours.mp4 ref.mp4 &&
+    line=$("$kit/build/langc" ffmpeg "$kit/test/media/$prog" "$entry" $inputs -o ref.mp4) &&
+    [ "$line" = "$(cat "$kit/test/ffmpeg/$name.cmd")" ] &&
+    set -- $line && shift && ff "$@" &&
+    "$kit/build/langc" build "$kit/test/media/$prog" "$entry" $inputs -o ours.mp4 &&
+    fm ours.mp4 >ours.md5 && fm ref.mp4 >ref.md5 && cmp -s ours.md5 ref.md5 &&
+    [ "$(rg -c '^0,' ours.md5)" = "$frames" ]) \
+    || { echo "FAIL media $name: the argv, REF, OURS or the framemd5 differ"; fail=$((fail + 1)); }
+done <test/media/expect.txt
+echo "media R1: $(wc -l <test/media/expect.txt | tr -d ' ') checked"
+
+# Each line of test/media/laws.txt is `LEFT RIGHT IN`: the two builds have the
+# same framemd5 (D1: trim i (trim i v) = trim i v; trim i (trim j v) =
+# trim (i cap j) v).
+while read -r left right input; do
+  (cd "$media" &&
+    "$kit/build/langc" build "$kit/test/media/cut.lang" "$left" "$input" -o left.mp4 &&
+    "$kit/build/langc" build "$kit/test/media/cut.lang" "$right" "$input" -o right.mp4 &&
+    fm left.mp4 >left.md5 && fm right.mp4 >right.md5 && cmp -s left.md5 right.md5) \
+    || { echo "FAIL media law $left = $right on $input"; fail=$((fail + 1)); }
+done <test/media/laws.txt
+echo "media laws: $(wc -l <test/media/laws.txt | tr -d ' ') checked"
+
+# Each line of test/media/refuse.txt is `CODE STATUS PROG MAIN IN...`: build and
+# ffmpeg exit STATUS with `langc: CODE: ` on stderr, no stdout and no file (D3).
+while read -r code want prog entry inputs; do
+  for verb in build ffmpeg; do
+    status=0
+    (cd "$media" && rm -f no.mp4 &&
+      "$kit/build/langc" $verb "$kit/test/media/$prog" "$entry" $inputs -o no.mp4 >out 2>err) || status=$?
+    case "$status:$(head -n 1 "$media/err"):$(wc -c <"$media/out" | tr -d ' '):$([ -e "$media/no.mp4" ] && echo file)" in
+      "$want:langc: $code: "*":0:") ;;
+      *) echo "FAIL media $verb $code: want exit $want, $code, no stdout and no file, got exit $status"; fail=$((fail + 1)) ;;
+    esac
+  done
+done <test/media/refuse.txt
+echo "media refusals: $(wc -l <test/media/refuse.txt | tr -d ' ') checked"
+
+# The media verbs need -o OUT.
+for verb in build ffmpeg; do
+  status=0
+  build/langc $verb test/media/cut.lang main "$media/av.mp4" >/dev/null 2>&1 || status=$?
+  [ "$status" -eq 2 ] || { echo "FAIL media $verb usage: want exit 2, got $status"; fail=$((fail + 1)); }
+done
+set +f
+
 rm -rf "$tmp"
 
 if rg -n '\x{2013}|\x{2014}' . >/dev/null; then

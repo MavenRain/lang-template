@@ -1,15 +1,16 @@
 # TinyCC media host kit (scaffold)
 
-This kit compiles a small typed language to JSON. A C front end (lexer,
+This kit compiles a small typed language to JSON and trimmed media. A C front end (lexer,
 parser, checker and evaluator) and a JSON writer build with TinyCC into
 one executable, `build/langc`. The output is the final state of each
-instance in the program. There is no IR and no lowering step.
+instance in the program. A media build lowers a Video entry to a trim
+chain over one input, then decodes and encodes the kept frames and audio.
 
 This scaffold adds media primitives to the JSON host. `check` and `eval`
 understand `Video`, `Interval`, `interval`, `trim` and `intersect`;
 `Position` is defined as `Nat` in the domain. `build` writes JSON,
 including intervals as described below. `Video` remains opaque, and
-media decoding and encoding are planned.
+the media verbs apply Video definitions to input files.
 
 From this kit directory, or from a generated language directory:
 
@@ -37,6 +38,8 @@ with the installation prefix to use its libraries and CLI together.
 | `langc check PROG` | Checks the program. Prints `ok`. |
 | `langc eval PROG NAME [ARGS...]` | Applies the definition `NAME` to the literal arguments and prints the normal form. A Nat overflow prints `trap`. |
 | `langc build PROG [-o OUT]` | Checks the program, evaluates each instance and writes one JSON document to stdout, or to `OUT` |
+| `langc build PROG MAIN IN... -o OUT` | Applies the Video definition `MAIN` to the input files and encodes the result to `OUT` (mp4: libx264 and aac with the options of the ffmpeg CLI). A failed or refused build keeps an existing `OUT` and creates no new output. |
+| `langc ffmpeg PROG MAIN IN... -o OUT` | Prints the ffmpeg command line that makes the same cut. The gate runs it to make the reference output (R1). |
 
 Exit 0 is success. Exit 1 is a refused program. Exit 2 is a usage or IO
 error. A refusal writes one line to stderr: `langc: CODE: NAME: message`.

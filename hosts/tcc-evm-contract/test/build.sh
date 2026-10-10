@@ -9,66 +9,16 @@ refused=0
 tmp=${TMPDIR:-/tmp}/langc-build.$$
 mkdir -p "$tmp"
 
-# hexnorm H: the hex number H in lowercase with no leading zeros ("0" for zero).
-hexnorm() {
-  printf 'obase=16; ibase=16; %s\n' "$(printf '%s' "$1" | tr a-f A-F)" | bc | tr A-F a-f
-}
-
-# word TOKEN: the storage word of a value that `langc eval` prints, as hexnorm.
-word() {
-  case $1 in
-    0x*) hexnorm "${1#0x}" ;;
-    flagYes) echo 1 ;;
-    flagNo) echo 0 ;;
-    *u) printf 'obase=16; %s\n' "${1%u}" | bc | tr A-F a-f ;;
-    *) printf 'obase=16; %s\n' "$1" | bc | tr A-F a-f ;;
-  esac
-}
-
-# pad H: H as 64 hex digits.
-pad() {
-  printf '%64s' "$1" | tr ' ' 0
-}
-
-# put SLOT VALUE: one expected storage row. A zero word is not stored.
-put() {
-  [ "$2" = 0 ] || echo "$1 $2" >>"$tmp/want"
-}
-
-# list SLOT ARG: the length n at SLOT, element j at keccak256(SLOT) + (n-1-j) (C-c9-1).
-list() {
-  base=$(build/slottool "$1")
-  len=$(printf '%s' "$2" | tr -d '()' | awk '{ for (i = 1; i <= NF; i++) if ($i != "cons" && $i != "nil") c++ } END { print c + 0 }')
-  j=0
-  for t in $(printf '%s' "$2" | tr -d '()'); do
-    case $t in
-      cons|nil) ;;
-      *)
-        at=$(printf 'obase=16; ibase=16; %s + %X\n' "$(printf '%s' "$base" | tr a-f A-F)" "$((len - 1 - j))" | bc | tr A-F a-f)
-        put "$(pad "$at")" "$(word "$t")"
-        j=$((j + 1)) ;;
-    esac
-  done
-  put "$1" "$(word "$j")"
-}
-
-# map SLOT ARG: the value at key k at keccak256(k . SLOT).
-map() {
-  slot=$1
-  set -- $(printf '%s' "$2" | tr -d '()[],')
-  shift
-  while [ "$#" -ge 2 ]; do
-    put "$(build/slottool "$(pad "$(word "$1")")$slot")" "$(word "$2")"
-    shift 2
-  done
-}
+# The storage helpers hexnorm, word, pad, put, list and map are the chain
+# helpers of test/evm.sh (O-c2-1). put writes the rows to $tmp/want.rows.
+. test/evmchain.sh
 
 # For each example with a state, `langc build` and `evm run --create --dump`
 # must give the storage of `langc eval PROG init` (the reference evaluator).
 for prog in examples/contract.lang examples/map.lang examples/storage.lang; do
   builds=$((builds + 1))
   checks=$((checks + 1))
-  : >"$tmp/want"
+  : >"$tmp/want.rows"
   build/langc eval "$prog" init | awk '{
     s = $0; sub(/^makeState /, "", s); d = 0; a = ""
     for (i = 1; i <= length(s); i++) {
@@ -97,7 +47,7 @@ for prog in examples/contract.lang examples/map.lang examples/storage.lang; do
   while read -r key value; do
     echo "$key $(hexnorm "$value")" >>"$tmp/got"
   done <"$tmp/rows"
-  sort "$tmp/want" >"$tmp/want.sorted"
+  sort "$tmp/want.rows" >"$tmp/want.sorted"
   sort "$tmp/got" >"$tmp/got.sorted"
   if [ "$status" -ne 0 ] || ! cmp -s "$tmp/want.sorted" "$tmp/got.sorted"; then
     echo "FAIL build $prog: exit $status: $(head -n 1 "$tmp/err")"
