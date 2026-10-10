@@ -7,7 +7,7 @@ The TinyCC host kit of retainer-lang. It compiles the contract language to EVM b
 - The front end, `src/main.c`, `src/ir.h`, `src/target.h`, `gen/`, `domain/`, `examples/` and `test/gate.sh` are copies of `hosts/tcc-wasm`. The SHA-256 of each source file is in `lang-template-work/tcc-evm-contract-snapshot.txt`, with a list of the changes.
 - `src/asm.c` and `src/asm.h` come from the escrowc assembler (escrow-lang `src/evm.c`). The labels are numbers, not a fixed enum.
 - `src/keccak.c` and `src/keccak.h` are copies of the escrowc files. Only the names are changed.
-- `src/evm.c` is the EVM target. It writes the ABI selectors and the code of `langc build` (`evm_build` in `src/evm.h`). `src/lower.c` gives it the storage words of `init` (slice K4a) and the IR of each entry (slice K4b). The views, the logs and the calls come in slices K4c and K4d.
+- `src/evm.c` is the EVM target. It writes the ABI selectors and the code of `langc build` (`evm_build` in `src/evm.h`). `src/lower.c` gives it the storage words of `init` (slice K4a) and the IR of each entry (slice K4b) and each view (slice K4c). The logs and the calls come in slices K4c and K4d.
 
 ## Slices
 
@@ -22,7 +22,8 @@ The TinyCC host kit of retainer-lang. It compiles the contract language to EVM b
 | K4a1 | Named events (front end) | Done |
 | K4a | Build output and storage layout | Done |
 | K4b | Entries, dispatch and call data decode | Done |
-| K4c to K5 | See the retainer-lang brief | Planned |
+| K4c | EVM views; EVM logs are planned | In progress |
+| K4d to K5 | See the retainer-lang brief | Planned |
 
 
 ## U256 and Addr (slice K2)
@@ -203,11 +204,11 @@ state makeState 7u
 
 ## EVM output (slice K4)
 
-Slice K4a writes the creation code of a contract. Slice K4b writes the runtime: the dispatcher and one block for each entry. `src/lower.c` walks the state of `init` and makes a list of (slot, value) words. It also lowers the body of each entry from Core to IR (`src/ir.h`). `evm_build` in `src/evm.c` makes the code from the words and the IR. `src/evm.h` has no front-end type.
+Slice K4a writes the creation code of a contract. Slice K4b writes the runtime: the dispatcher and one block for each entry. Slice K4c adds one block for each view. `src/lower.c` walks the state of `init` and makes a list of (slot, value) words. It also lowers the body of each entry and each view from Core to IR (`src/ir.h`). `evm_build` in `src/evm.c` makes the code from the words and the IR. `src/evm.h` has no front-end type.
 
 - `langc build` evaluates `init` with the evaluator of `langc eval`. The creation code has PUSH value, PUSH slot, SSTORE for each word that is not zero. Then it copies the runtime and returns it.
-- The runtime has the dispatcher, then one shared REVERT block with empty data, then the shared `Trap()` block, then one block for each entry.
-- A contract with no entry has a runtime of 37 bytes: the dispatcher head, the REVERT block and the `Trap()` block. Each call to it reverts with empty data.
+- The runtime has the dispatcher, then one shared REVERT block with empty data, then the shared `Trap()` block, then one block for each entry and each view.
+- A contract with no entry or view has a runtime of 37 bytes: the dispatcher head, the REVERT block and the `Trap()` block. Each call to it reverts with empty data.
 
 Storage layout:
 
@@ -222,7 +223,7 @@ Dispatch (slice K4b):
 - Call data shorter than 4 bytes reverts with empty data.
 - The selector is CALLDATALOAD(0) shifted right by 224 bits. The dispatcher compares it with the selector of each entry (DUP1, PUSH4, EQ, JUMPI). An unknown selector goes into the REVERT block and reverts with empty data.
 - The selector of an entry is the first 4 bytes of the keccak256 of its signature `name(t1,...,tn)`. The ABI type names are: Nat is `uint64`, Flag is `bool`, U256 is `uint256` and Addr is `address`.
-- The views are not in the dispatcher. A call to a view reverts as an unknown selector. Slice K4c adds the views.
+- Slice K4c puts the views in the dispatcher (C-K4-10). The selector of a view has the same form. A call to a view with a value also reverts.
 
 Decode (slice K4b):
 
@@ -239,6 +240,11 @@ Entry body (slice K4b):
 - The runtime drops the OUT part and writes no LOG. Slice K4c adds the logs.
 - `src/lower.c` lowers the first-order word part of the body: Nat, Flag, U256 and Addr values, Option, Prod and `if`. Each op gives the result of the evaluator: Nat add and mul use the K2 u64 rules; U256 add and mul trap on overflow, sub stops at 0, and div rounds down and traps on 0.
 
+View body (slice K4c):
+
+- A view returns one word. The block computes the word with the rules of an entry body, puts it in memory at byte 0 and returns these 32 bytes (RETURN). The word has the ABI form of the result type: Nat is `uint64`, Flag is `bool`, U256 is `uint256` and Addr is `address`.
+- A view writes no storage. A trap in a view reverts with the `Trap()` selector, as in an entry.
+
 Output:
 
 - One line of lowercase hex, with no `0x` and a newline at the end. It goes to stdout, or to OUT with `-o OUT`.
@@ -248,7 +254,7 @@ Output:
 
 REFUSE_LOWER refuses a state that has no storage form in slice K4a: an Option field, a Prod field, a List of a type that is not a word, a nested List, a Map with a key or a value that is not a word, an `init` with arguments, and a program with no state or no `init`. `langc check` refuses a Map with a List value first (REFUSE_MAP).
 
-REFUSE_LOWER also refuses an entry body that slice K4b does not lower: a write of a List field (`test/lower/list-write.lang`), a `fold` at a word position (`test/lower/nat-fold.lang`), and each other residual that is not first-order word code. It also refuses an entry that makes an `emit` (`test/lower/emit.lang`), because `emit` has no EVM form: use a named event. A def with the type of an entry and an argument that is not a word is a helper, not an entry: it is not in the dispatcher.
+REFUSE_LOWER also refuses an entry body that slice K4b does not lower: a write of a List field (`test/lower/list-write.lang`), a `fold` at a word position (`test/lower/nat-fold.lang`), and each other residual that is not first-order word code. It also refuses an entry that makes an `emit` (`test/lower/emit.lang`), because `emit` has no EVM form: use a named event. The same rules apply to the body of a view. A def with the type of an entry or a view and an argument that is not a word is a helper: it is not in the dispatcher.
 
 The other refusals of `langc build` (exit 1, no output):
 
@@ -260,7 +266,7 @@ The other refusals of `langc build` (exit 1, no output):
 
 `test/dispatch.sh` builds `examples/residuals.lang` and does 20 calls with geth `evm run`: empty call data, a short selector, an unknown selector, a call value (and a control call with no value), `none`, a trap, a caller that is not the owner, short call data, dirty Nat bits, Nat 2^64 - 1, dirty Addr bits (bit 160), a dirty Flag word (the value 2), a control call with an Addr and a Flag argument, and the storage after three entries. The selectors and the Map slots come from the SHA3 op of `evm`, not from `langc`.
 
-`test/evm.sh` is the chain test (the helpers are in `test/evmchain.sh`). It deploys `examples/contract.lang`, `examples/map.lang` and `examples/residuals.lang` with `evm run --create`. Then it does one `evm run --prestate --dump` step for each call of `test/run/basic.script`, `test/run/map.script` and `test/run/residuals.script` (21 steps). The block TIMESTAMP of a step is `NOW` (the prestate timestamp) and the sender is `CALLER`. After each step, the storage must equal the state that `langc run` prints for the calls up to that step. The result must agree with the result of the call: ok, revert (`none`) or trap. A view call reverts, because slice K4b has no views in the dispatcher. The selectors come from the SHA3 op of `evm`. The argument types come from the `def` line of the entry.
+`test/evm.sh` is the chain test (the helpers are in `test/evmchain.sh`). It deploys `examples/contract.lang`, `examples/map.lang` and `examples/residuals.lang` with `evm run --create`. Then it does one `evm run --prestate --dump` step for each call of `test/run/basic.script`, `test/run/map.script` and `test/run/residuals.script` (21 steps). The block TIMESTAMP of a step is `NOW` (the prestate timestamp) and the sender is `CALLER`. After each step, the storage must equal the state that `langc run` prints for the calls up to that step. The result must agree with the result of the call: ok, revert (`none`) or trap. A view call must return the 32-byte word of the value that `langc run` prints for the view. The selectors come from the SHA3 op of `evm`. The argument types come from the `def` line of the entry.
 
 `build/buildtool` checks the 37-byte runtime of a contract with no entry, the EIP-170 runtime limit in the two output modes, the EVM_SELECTOR refusal (before any output) and IO_WRITE with exit 2 for a closed stdout pipe.
 

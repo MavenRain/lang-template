@@ -226,11 +226,16 @@ static int emit_stmt(Emit *e, const IrStmt *s) {
   case IR_STMT_TRAP: asm_jump(a, e->trap); return 1;
   case IR_STMT_REVERT: asm_jump(a, e->revert); return 1;
   case IR_STMT_STOP: asm_op(a, EVM_OP_STOP); return 1;
+  case IR_STMT_RETURN: /* a view (C-K4-10): the word at memory 0, 32 bytes */
+    if (!emit_expr(e, s->expr)) return 0;
+    emit_ops(a, (const Op[]){EVM_OP_PUSH0, EVM_OP_MSTORE}, 2);
+    asm_push(a, 32);
+    emit_ops(a, (const Op[]){EVM_OP_PUSH0, EVM_OP_RETURN}, 2);
+    return 1;
   case IR_STMT_ALLOC:
   case IR_STMT_SWITCH:
   case IR_STMT_REPEAT:
-  case IR_STMT_WHILE:
-  case IR_STMT_RETURN: return 0;
+  case IR_STMT_WHILE: return 0;
   }
   return 0;
 }
@@ -244,7 +249,8 @@ static int emit_block(Emit *e, IrBlock b) {
 /* Entry FN at label LABEL (C-K4b-1): pop the selector, revert on call data
    shorter than 4 + 32 * N, store argument word k at local k after the
    dirty-bit check (C-K4-6: a dirty word gives the empty REVERT), then the
-   body. Returns 0 on an IR form that the EVM back end does not lower. */
+   body. The body of a view ends in RETURN (C-K4-10). Returns 0 on an IR
+   form that the EVM back end does not lower. */
 static int evm_entry(Emit *e, const IrFunc *fn, Label label) {
   Asm *a = e->a;
   e->scratch = 32u * (uint64_t)fn->local_count;
@@ -268,12 +274,13 @@ static int evm_entry(Emit *e, const IrFunc *fn, Label label) {
   return emit_block(e, fn->body);
 }
 
-/* The runtime (C-K4b-1, C-K4b-4: entries only). The dispatcher head reverts
-   on a call value or on call data shorter than 4 bytes (C-K4-11), puts the
-   selector on the stack and jumps to entry i at label FIRST + i on a match.
+/* The runtime (C-K4b-1; slice K4c: the entries and the views, C-K4-10). The
+   dispatcher head reverts on a call value or on call data shorter than 4
+   bytes (C-K4-11), puts the selector on the stack and jumps to function i
+   (an entry or a view) at label FIRST + i on a match.
    An unknown selector falls through to the shared empty REVERT block
-   (C-K4-8). The shared Trap() REVERT block (C-K4-9) and the entries come
-   after it. */
+   (C-K4-8). The shared Trap() REVERT block (C-K4-9), the entries and the
+   views come after it. */
 static EvmBuild evm_runtime(Asm *a, const IrProgram *prog, Label first) {
   uint64_t hits[ASM_LABELS];
   if (prog->func_count > ASM_LABELS) return EVM_BUILD_SIZE;

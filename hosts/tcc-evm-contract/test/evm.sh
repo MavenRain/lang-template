@@ -4,8 +4,8 @@
 # step for each call of the script. After each step, the storage must equal
 # the state that `langc run` prints for the calls up to that step, and the
 # result must agree with the result of the call: ok, revert (`none`) or trap
-# (the Trap() selector). A view call reverts: slice K4b has no views in the
-# dispatcher. The TIMESTAMP of the block is NOW (the prestate timestamp) and
+# (the Trap() selector). A view call must return the 32-byte word of the view
+# value (slice K4c, C-K4-10). The TIMESTAMP of the block is NOW (the prestate timestamp) and
 # the sender is CALLER. It needs evm (go-ethereum), bc, od and build/slottool.
 # Run it from the kit root.
 set -u
@@ -38,11 +38,12 @@ chain() {
       fail=$((fail + 1))
       return
     fi
+    _value=$(awk -v k="$_k" '$1 == k { print $4 }' "$tmp/run")
     case $(awk -v k="$_k" '$1 == k { print $3 }' "$tmp/run") in
       ok) _want=ok ;;
       revert) _want=revert ;;
       trap) _want=trap ;;
-      =) _want=revert ;;
+      =) _want="out $(word "$_value")" ;;
       *) _want=unknown ;;
     esac
     want "$(awk '$1 == "state" { sub(/^state /, ""); print }' "$tmp/run")"
@@ -51,6 +52,10 @@ chain() {
       fail=$((fail + 1))
       return
     fi
+    case $result in
+      "out "*) _hex=${result#out }
+        [ ${#_hex} -eq 64 ] && result="out $(hexnorm "$_hex")" ;;
+    esac
     if [ "$result" != "$_want" ] || ! cmp -s "$tmp/want" "$tmp/got"; then
       echo "FAIL evm $_script:$_k $_name: want $_want, got $result"
       diff "$tmp/want" "$tmp/got" | head -n 6

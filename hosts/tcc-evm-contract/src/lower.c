@@ -178,7 +178,8 @@ typedef struct {
   uint32_t def;
   uint32_t arg_count;
   const Value *arg_types[ENTRY_PARAMS_MAX];
-  const Value *body; /* Option (Prod State (List Out)), open in the levels */
+  const Value *result; /* a view: the type of its word */
+  const Value *body;   /* an entry: Option (Prod State (List Out)); a view: one word; open in the levels */
 } Residual;
 
 static uint32_t family_named(const Machine *m, const char *name) {
@@ -192,8 +193,9 @@ static int is_family_value(const Value *t, uint32_t family) {
   return t != NULL && val_is(t, OP_FAMILY) && t->inst == family;
 }
 
-/* 1 when def I is an entry; then R holds its residual. 0 for a helper or a
-   view (views are K4c, C-K4b-4). -1 after a diagnostic. */
+/* 1 when def I is an entry and 2 when it is a view (C-K4-10: the result is
+   one word); then R holds its residual. 0 for a helper. -1 after a
+   diagnostic. */
 static int residualize(Machine *m, uint32_t env, uint32_t out, uint32_t i, Residual *r) {
   const Value *t = m->defs[i].type;
   memset(r, 0, sizeof *r);
@@ -212,15 +214,17 @@ static int residualize(Machine *m, uint32_t env, uint32_t out, uint32_t i, Resid
     if (t == NULL) return -1;
     r->arg_count++;
   }
-  if (!val_is(t, OP_OPTION) || !val_is(t->args[0], OP_PROD)) return 0;
-  const Value *p = t->args[0];
-  if (!is_family_value(p->args[0], m->state_family) || !val_is(p->args[1], OP_LIST)
-      || !is_family_value(p->args[1]->args[0], out)) return 0;
+  const Value *p = val_is(t, OP_OPTION) && val_is(t->args[0], OP_PROD) ? t->args[0] : NULL;
+  int entry = p != NULL && is_family_value(p->args[0], m->state_family) && val_is(p->args[1], OP_LIST)
+              && is_family_value(p->args[1]->args[0], out);
+  int role = is_word_type(t) ? 2 : entry;
+  if (role == 0) return 0;
+  r->result = t;
   m->fuel = EVAL_FUEL_STEPS;
   const Value *v = def_value(m, i);
   for (uint32_t k = 0; v != NULL && k < r->arg_count + 2u; k++) v = apply_value(m, v, val_var(m, k));
   r->body = v;
-  return v == NULL ? -1 : 1;
+  return v == NULL ? -1 : role;
 }
 
 /* The lowering of the residuals to IR (slice K4b1, C-K4-2, C-K4b-7). An
@@ -526,6 +530,16 @@ static int lower_result(Low *l, Stmts *b, const Value *v) {
   return refuse(l, v, "as an entry result");
 }
 
+/* A view body (C-K4-10) is one word and writes no state: the block returns
+   the word. A trap in the word stops the call with TRAP. */
+static int lower_view(Low *l, Stmts *b, const Value *v) {
+  const IrExpr *x = lower_expr(l, b, v);
+  IrStmt *s = x != NULL ? new_stmt(l, IR_STMT_RETURN) : NULL;
+  if (s == NULL) return 0;
+  s->expr = x;
+  return push(l, b, s);
+}
+
 static IrScalar scalar_of(const Value *t) {
   return val_is(t, OP_FLAG) ? IR_SCALAR_FLAG
          : val_is(t, OP_U256) ? IR_SCALAR_U256
@@ -533,7 +547,8 @@ static IrScalar scalar_of(const Value *t) {
          : IR_SCALAR_NAT;
 }
 
-/* PROGRAM gets one IrFunc for each entry. Returns 1, or 0 after a diagnostic. */
+/* PROGRAM gets one IrFunc for each entry and each view (C-K4-10). Returns 1,
+   or 0 after a diagnostic. */
 static int lower_entries(Machine *m, const CtorInfo *ci, IrProgram *program) {
   uint32_t env = family_named(m, "Env");
   uint32_t out = family_named(m, "Out");
@@ -548,9 +563,12 @@ static int lower_entries(Machine *m, const CtorInfo *ci, IrProgram *program) {
     Low l = {m, ci, env < m->family_count ? &m->ctors[m->families[env].first_ctor] : NULL, r.arg_count, m->defs[i].name};
     Stmts b = {NULL, 0, 0};
     IrScalar *params = r.arg_count > 0 ? low_alloc(&l, r.arg_count * sizeof *params) : NULL;
-    if ((r.arg_count > 0 && params == NULL) || !lower_result(&l, &b, r.body)) return 0;
+    if ((r.arg_count > 0 && params == NULL)
+        || !(role == 2 ? lower_view(&l, &b, r.body) : lower_result(&l, &b, r.body)))
+      return 0;
     for (uint32_t k = 0; k < r.arg_count; k++) params[k] = scalar_of(r.arg_types[k]);
-    IrFunc func = {m->defs[i].name, params, r.arg_count, IR_SCALAR_NAT, l.locals, block_of(&b)};
+    IrScalar result = role == 2 ? scalar_of(r.result) : IR_SCALAR_NAT;
+    IrFunc func = {m->defs[i].name, params, r.arg_count, result, l.locals, block_of(&b)};
     funcs[n++] = func;
   }
   program->funcs = funcs;
