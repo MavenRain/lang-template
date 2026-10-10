@@ -82,26 +82,36 @@ that `G` factors through it. The writer puts the decision of each tally in
 a verdict table. Any other program is Arrow-impossibility, with no verdict
 table.
 
-`domain/entries.c` gives `lang_domain_entries(regime, &count)` from
-`src/asm.h`: the entries of a regime in dispatch order (1 to 16). Each
-`Entry` has:
+`domain/entries.c` gives `lang_domain_entries(regime, c, &count)` from
+`src/asm.h`: the entries of a regime in dispatch order (1 to 16). `c` is
+the `EntryContext` (below), so that a domain can choose its entries from
+the program data. Each `Entry` has:
 
 - `name`: the function name of the selector;
-- `words`: the count of `uint256` calldata words before the ballots;
+- `words`: the count of calldata words (32 bytes each) before the ballots;
 - `ballots`: 1 if n ballot words follow (Arrow-Debreu only), else 0;
 - `payment`: `ENTRY_PAYABLE` or `ENTRY_NONPAYABLE`;
-- `emit`: the function that writes the body.
+- `emit`: the function that writes the body;
+- `types`: NULL for the selector `name(uint256,...)`, one `uint256` for
+  each word, or the argument text for `name(types)`, for example
+  `address`.
 
 The core writes the dispatcher, then for each entry a head (callvalue
 guard unless payable, calldata size check), then calls `emit`. An unknown
 selector reverts. `emit` gets an `EntryContext`: `members` (n), `decisions`
-(k, or 0 in Arrow-impossibility), `packed` (the amend word, Arrow-Debreu
-only) and `data` (the program data, below). The core entries
-`lang_entry_cast` and `lang_entry_amend` can go in a list. The `asm_*` helpers of `src/asm.h` write opcodes, pushes, labels
-(64 for each contract), jumps, calldata words, mapping slots
-(keccak(key . slot)), checked addition, memory words, an address guard and
-`asm_tally` (the decision code of the n ballots from the verdict table).
-Memory 0x00 to 0x3f is core scratch. A domain uses 0x80 and up.
+(k, or 0 in Arrow-impossibility), `packed` (the amend word in
+Arrow-Debreu; NULL in Arrow-impossibility, or when the codes do not fit
+one word) and `data` (the program data, below). The core entries
+`lang_entry_cast` and `lang_entry_amend` can go in a list. With `packed`
+NULL, `lang_entry_amend` reverts with no output. The `asm_*` helpers of
+`src/asm.h` write opcodes, pushes, labels (64 for each contract), jumps,
+calldata words, mapping slots (keccak(key . slot)), checked addition,
+memory words, an address guard, `asm_verdict` (the decision code at an
+index of the verdict table) and `asm_tally` (the decision code of the n
+ballots, read from the verdict table with `asm_verdict`). The core label
+`LABEL_END` is the end of the creation code (the init code length), for a
+constructor word of the domain. Memory 0x00 to 0x3f is core scratch. A
+domain uses 0x80 and up.
 
 The program data of a domain is data that the program gives and the
 contract keeps, for example a genesis ledger. The core does not know its
@@ -158,7 +168,7 @@ claim. Mappings live at keccak(key . slot).
 | `deposit` (payable) | both | 3 words | Guards the two addresses, requires amount <= callvalue, credits the payer, adds a claim and returns its index. |
 | `cast` | Arrow-Debreu | n ballots | Returns the decision code of the ballots. |
 | `settle` | Arrow-Debreu | claim index, n ballots | Requires amount <= the payer balance. Code 1 (release) moves the amount from the payer to the payee. Code 2 (refund) debits the payer. Other codes hold. Returns the code. |
-| `amend` | Arrow-Debreu | none | Returns the packed verdict table word. |
+| `amend` | Arrow-Debreu | none | Returns the packed verdict table word. If the codes do not fit one word (k = 3: n > 14), it reverts with no output. |
 
 Limits of the sample (not of the core): `settle` does not close the claim,
 so one claim can settle more than one time while the payer balance covers
@@ -176,7 +186,7 @@ entry sends funds out of the contract.
 | `TYPE_SCOPE`, `TYPE_DUPLICATE`, `TYPE_MISMATCH`, `TYPE_SHAPE`, `TYPE_ERASED`, `TYPE_MATCH`, `TYPE_UNIVERSE`, `TYPE_INFER`, `TYPE_REC`, `TYPE_MU`, `TYPE_NAT`, `TYPE_FUEL` | Checker errors. `TYPE_NAT` is a Nat overflow. `TYPE_FUEL` is out of fuel or too deep. |
 | `TABLE_DECISION`, `TABLE_STUCK`, `TABLE_LIMIT` | D is not a valid decision space, the rule does not reduce at a tally, or too many members or tallies |
 | `VERDICT_TYPE`, `VERDICT_LIMIT` | `NAME` is not a ChoiceRule, or k^n is more than 59049 |
-| `EVM_LIMIT`, `EVM_TABLE`, `EVM_SIZE` | Too many members for the amend word, a bad verdict table, or the code is too large |
+| `EVM_LIMIT`, `EVM_TABLE`, `EVM_SIZE` | Too many members for the verdict table (more than 4096 bytes), a bad verdict table, or the code is too large (the code buffer, the label sites, or an entry signature of more than 512 bytes) |
 | `EVM_INTERNAL`, `EVM_USAGE`, `EVM_IO` | A writer fault, a bad writer call, or an output error |
 | `MEMORY`, `IO_READ`, `IO_SIZE`, `IO_WRITE`, `USAGE`, `TYPE_INTERNAL` | Arena full, file errors, bad arguments, checker fault |
 
@@ -189,11 +199,11 @@ each checker error.
 compilers, runs `make check-clang`, then `test/gate.sh`. The gate runs, in
 order: `test/parse.sh`, `test/embed-safety.sh`, `test/check.sh`,
 `test/build-output.sh` (a refused build and a source alias keep the files),
-`test/refusal.sh`,
+`build/evm-boundaries` (the entry signature limits), `test/refusal.sh`,
 `test/normal-forms.py`, `test/differential.py` (k = 3, geth against
 `langc table` and `langc verdicts`), `test/domains.sh`,
 `test/differential.py --langc build/k4/langc --decisions 4 --program
-test/domains/plural4.lang`, `test/settlement.py` (60 ledger cases in geth)
+test/domains/plural4.lang`, `test/settlement.py` (71 ledger cases in geth)
 and a scan for en and em dashes. It ends with `gate: 0 failures`.
 `make clean` removes `build/` and `.gatework/`.
 
@@ -210,11 +220,12 @@ and a scan for en and em dashes. It ends with `gate: 0 failures`.
 | Tallies for `table` | 501501 | `src/check.c:19` |
 | Ballot vectors for `verdicts` | 59049 (3^10) | `src/check.c:17` |
 | Decision values k | 2 to 64 | `src/evm.h:7` |
-| Members for `build` (Arrow-Debreu) | largest n with C(n+k-1, k-1) * ceil(log2(k+1)) <= 256 (k = 3: 14) | `src/evm.c:374` |
-| Verdict table | n(n+1)^(k-2) + 1 bytes, at most 4096 | `src/evm.c:382` |
-| Code buffer, fixups, labels | 8192 bytes, 512, 64 | `src/asm.h:17` |
+| Members for `build` (Arrow-Debreu) | largest n with n(n+1)^(k-2) + 1 <= 4096 (k = 3: 63, k = 4: 15; at k = 3 the signature of the sample `settle` sets 62) | `src/evm.c:411` |
+| Verdict table | n(n+1)^(k-2) + 1 bytes, at most 4096 | `src/evm.c:402` |
+| Code buffer, fixups, labels | 24576 bytes, 512, 64 | `src/asm.h:17` |
 | Entries for each regime | 16 | `src/evm.c:22` |
-| Runtime code | 24576 bytes (EIP-170) | `src/evm.c:22` |
+| Runtime code | 24576 bytes (EIP-170) | `src/evm.c:23` |
+| Entry signature text | 512 bytes | `src/evm.c:26` |
 
 ## Origin
 

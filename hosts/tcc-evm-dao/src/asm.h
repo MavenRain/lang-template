@@ -14,7 +14,7 @@
 #include "evm.h"
 
 enum {
-  EVM_CAPACITY = 8192,
+  EVM_CAPACITY = 24576,
   EVM_FIXUPS = 512,
   EVM_LABELS = 64
 };
@@ -22,22 +22,30 @@ enum {
 typedef enum {
   OP_ADD = 0x01, OP_MUL = 0x02, OP_SUB = 0x03, OP_DIV = 0x04, OP_MOD = 0x06,
   OP_LT = 0x10, OP_GT = 0x11, OP_EQ = 0x14, OP_ISZERO = 0x15, OP_AND = 0x16,
-  OP_SHR = 0x1c, OP_SHA3 = 0x20, OP_CALLER = 0x33, OP_CALLVALUE = 0x34,
-  OP_CALLDATALOAD = 0x35, OP_CALLDATASIZE = 0x36, OP_CODECOPY = 0x39,
-  OP_POP = 0x50, OP_MLOAD = 0x51, OP_MSTORE = 0x52, OP_SLOAD = 0x54,
-  OP_SSTORE = 0x55, OP_JUMP = 0x56, OP_JUMPI = 0x57, OP_GAS = 0x5a,
-  OP_JUMPDEST = 0x5b, OP_PUSH0 = 0x5f, OP_PUSH1 = 0x60, OP_PUSH2 = 0x61,
-  OP_PUSH4 = 0x63, OP_DUP1 = 0x80, OP_DUP2 = 0x81, OP_DUP3 = 0x82,
-  OP_DUP4 = 0x83, OP_SWAP1 = 0x90, OP_SWAP2 = 0x91, OP_SWAP3 = 0x92,
-  OP_CALL = 0xf1, OP_RETURN = 0xf3, OP_REVERT = 0xfd
+  OP_SHR = 0x1c, OP_SHA3 = 0x20, OP_ADDRESS = 0x30, OP_CALLER = 0x33,
+  OP_CALLVALUE = 0x34, OP_CALLDATALOAD = 0x35, OP_CALLDATASIZE = 0x36,
+  OP_CODESIZE = 0x38, OP_CODECOPY = 0x39, OP_EXTCODESIZE = 0x3b,
+  OP_RETURNDATASIZE = 0x3d, OP_POP = 0x50, OP_MLOAD = 0x51, OP_MSTORE = 0x52,
+  OP_SLOAD = 0x54, OP_SSTORE = 0x55, OP_JUMP = 0x56, OP_JUMPI = 0x57,
+  OP_GAS = 0x5a, OP_JUMPDEST = 0x5b, OP_PUSH0 = 0x5f, OP_PUSH1 = 0x60,
+  OP_PUSH2 = 0x61, OP_PUSH4 = 0x63, OP_DUP1 = 0x80, OP_DUP2 = 0x81,
+  OP_DUP3 = 0x82, OP_DUP4 = 0x83, OP_SWAP1 = 0x90, OP_SWAP2 = 0x91,
+  OP_SWAP3 = 0x92, OP_LOG3 = 0xa3, OP_CALL = 0xf1, OP_RETURN = 0xf3,
+  OP_STATICCALL = 0xfa, OP_REVERT = 0xfd
 } Op;
 
 /* A jump label. The labels below LABEL_FREE belong to the core; asm_label
- * gives the others (one per entry, and the labels of an entry body). */
+ * gives the others (one per entry, and the labels of an entry body).
+ * LABEL_END is the end of the creation code (the init code length), for a
+ * constructor word of the domain. */
 typedef unsigned Label;
-enum { LABEL_REVERT, LABEL_TABLE, LABEL_RUNTIME, LABEL_DATA, LABEL_FREE };
+enum { LABEL_REVERT, LABEL_TABLE, LABEL_RUNTIME, LABEL_DATA, LABEL_END, LABEL_FREE };
 
 typedef enum { ENTRY_PAYABLE, ENTRY_NONPAYABLE } Payment;
+
+/* The first overflow of an Asm: the code buffer, the label sites, or the
+ * text of an entry signature. finish reports each one as EVM_SIZE. */
+typedef enum { ASM_ROOM, ASM_FULL_CODE, ASM_FULL_FIXUPS, ASM_FULL_SIGNATURE } AsmFull;
 
 /* Pass 1 appends code and records each PUSH2 label site; pass 2 (resolve)
  * writes the label offsets into those sites. */
@@ -51,7 +59,7 @@ typedef struct {
   size_t sites;
   unsigned labels;   /* labels given by asm_label */
   int labels_full;
-  int full;
+  AsmFull full;      /* ASM_ROOM while the code fits */
 } Asm;
 
 /* What an entry body knows of the contract. */
@@ -62,18 +70,21 @@ typedef struct {
   const LangDomainData *data;   /* the program data (evm.h); NULL: the defaults */
 } EntryContext;
 
-/* One external entry, name(uint256 x (words + n when ballots)). The core
- * guards the call value (unless payable) and the calldata size. */
+/* One external entry, name(uint256 x (words + n when ballots)), or
+ * name(types) when types is set. The core guards the call value (unless
+ * payable) and the calldata size (32 bytes per word). */
 typedef struct {
   const char *name;
   unsigned words;   /* calldata words before the ballots */
   int ballots;      /* 1: n ballot words follow, from word `words` (Debreu only) */
   Payment payment;
   void (*emit)(Asm *a, const EntryContext *c);
+  const char *types;  /* NULL: each word is uint256; else the argument text, as "address" */
 } Entry;
 
-/* domain/entries.c: the entries of REGIME in dispatch order, *count set. */
-const Entry *lang_domain_entries(LangRegime regime, size_t *count);
+/* domain/entries.c: the entries of REGIME in dispatch order, *count set. C
+ * gives the program data, for a table per data. */
+const Entry *lang_domain_entries(LangRegime regime, const EntryContext *c, size_t *count);
 
 /* The core entries, for the Debreu list: cast (n ballots) and amend (0 words). */
 void lang_entry_cast(Asm *a, const EntryContext *c);
@@ -110,7 +121,11 @@ void asm_load(Asm *a, unsigned address);
 void asm_store(Asm *a, unsigned address);
 /* Reverts unless calldata word j is below 2^160. */
 void asm_address_guard(Asm *a, unsigned j);
+/* index -> the decision code at that index of the verdict table of members
+ * and k. The index must be below (members + 1)^(k - 1). */
+void asm_verdict(Asm *a, unsigned members, unsigned k);
 /* -> the decision code of the n ballots at calldata words first ..
- * first + n - 1, read from the verdict table. Each ballot must be 1 to k. */
+ * first + n - 1, read from the verdict table (asm_verdict). Each ballot must
+ * be 1 to k. */
 void asm_tally(Asm *a, unsigned first, unsigned members, unsigned k);
 #endif

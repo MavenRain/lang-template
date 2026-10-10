@@ -66,16 +66,18 @@ prelude is written to them.
   the table index, so the table has n(n+1)^(k-2) + 1 bytes (at most 4096,
   `EVM_TABLE`). Each ballot must be in 1 to k, or the call reverts.
 - `amend` returns the code of each tally packed in one word, with
-  ceil(log2(k+1)) bits for each code (k = 3: 2 bits). Thus the members
-  limit of Arrow-Debreu depends on k: C(n+k-1, k-1) codes must fit 256
-  bits (k = 3: 14 members, k = 4: 6 members; `EVM_LIMIT`).
+  ceil(log2(k+1)) bits for each code (k = 3: 2 bits). If the
+  C(n+k-1, k-1) codes do not fit 256 bits (k = 3: more than 14 members,
+  k = 4: more than 6 members), `amend` reverts with no output. The
+  members limit of Arrow-Debreu comes from the verdict table, at most
+  4096 bytes (k = 3: 63 members, k = 4: 15 members; `EVM_LIMIT`).
 - At a discrete decision space `gov F L` agrees with `F` on each
   configuration. Thus the canonical `amend` changes no verdict, and the
   packed word is the verdict table at the canonical amendment.
 - Arrow-impossibility has no verdict table. Its writer takes the full
   member range of the checker and requires no decision codes.
 - The runtime code is at most 24576 bytes (EIP-170) and the code buffer
-  is 8192 bytes (`EVM_SIZE`).
+  is 24576 bytes (`EVM_SIZE`).
 
 ## Gates (2026-10-07)
 

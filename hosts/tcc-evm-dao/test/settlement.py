@@ -130,7 +130,9 @@ def deploy(name, creation, runtime):
 
 def refusals():
     rows = [(('runtime', 0, 'debreu', 3), 'EVM_LIMIT'),
-            (('runtime', 15, 'debreu', *([1] * 136)), 'EVM_LIMIT'),
+            (('runtime', 64, 'debreu', *([1] * 2145)), 'EVM_LIMIT'),
+            (('runtime', 63, 'debreu', *([1] * 2080)), 'EVM_SIZE'),
+            (('-k', 4, 'runtime', 16, 'debreu', *([1] * 969)), 'EVM_LIMIT'),
             (('runtime', 0, 'impossibility'), 'EVM_LIMIT'),
             (('runtime', 3, 'debreu', *CODES[:-1]), 'EVM_TABLE'),
             (('runtime', 3, 'debreu', *CODES[:-1], 4), 'EVM_TABLE'),
@@ -216,14 +218,21 @@ def main():
     for members, codes, vectors in (
             (1, (3, 2, 1), [(1,), (2,), (3,)]),
             (14, tuple(i % 3 + 1 for i in range(120)),
-             [tuple((m * k) % 3 + 1 for m in range(14)) for k in range(5)] + [(1,) * 14, (2,) * 14])):
+             [tuple((m * k) % 3 + 1 for m in range(14)) for k in range(5)] + [(1,) * 14, (2,) * 14]),
+            (15, tuple(i % 3 + 1 for i in range(136)),
+             [tuple((m * k) % 3 + 1 for m in range(15)) for k in range(3)]),
+            (62, tuple(i % 3 + 1 for i in range(2016)),
+             [tuple((m * k) % 3 + 1 for m in range(62)) for k in range(3)] + [(3,) * 62])):
         code = bytecode('runtime', members, 'debreu', *codes)
         for k, ballots in enumerate(vectors):
             expect(f'cast-n{members}-{k}', code, data('cast', *ballots), {}, {},
                    verdict(members, codes, ballots))
             cases += 1
-        packed = sum(c * 4**index for index, c in enumerate(codes))
+        packed = sum(c * 4**index for index, c in enumerate(codes)) if 2 * len(codes) <= 256 else None
         expect(f'amend-n{members}', code, data('amend'), {}, {}, packed)
+        word = '' if packed is None else f'{packed:x}'.zfill(len(f'{packed:x}') + len(f'{packed:x}') % 2)
+        body = '5f5ffd' if packed is None else f'{0x5f + len(word) // 2:02x}{word}5f5260205ff3'
+        require(bytecode('amend', members, 'debreu', *codes) == body, f'evmtool amend n={members}')
         cases += 1
     print(f'SETTLEMENT cases={cases} deploy=2 geth=expected OK (logs: {WORK})')
 

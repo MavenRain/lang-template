@@ -116,17 +116,19 @@ static void settle(Asm *a, const EntryContext *c) {
 }
 
 static const Entry impossibility[] = {
-  {"deposit", 3, 0, ENTRY_PAYABLE, deposit},
+  {"deposit", 3, 0, ENTRY_PAYABLE, deposit, NULL},
 };
 
 static const Entry debreu[] = {
-  {"deposit", 3, 0, ENTRY_PAYABLE, deposit},
-  {"cast", 0, 1, ENTRY_NONPAYABLE, lang_entry_cast},
-  {"settle", 1, 1, ENTRY_NONPAYABLE, settle},
-  {"amend", 0, 0, ENTRY_NONPAYABLE, lang_entry_amend},
+  {"deposit", 3, 0, ENTRY_PAYABLE, deposit, NULL},
+  {"cast", 0, 1, ENTRY_NONPAYABLE, lang_entry_cast, NULL},
+  {"settle", 1, 1, ENTRY_NONPAYABLE, settle, NULL},
+  {"amend", 0, 0, ENTRY_NONPAYABLE, lang_entry_amend, NULL},
 };
 
-const Entry *lang_domain_entries(LangRegime regime, size_t *count) {
+/* The sample has one table per regime: it does not read C. */
+const Entry *lang_domain_entries(LangRegime regime, const EntryContext *c, size_t *count) {
+  (void)c;
   switch (regime) {
     case LANG_REGIME_IMPOSSIBILITY:
       *count = sizeof impossibility / sizeof impossibility[0];

@@ -32,7 +32,7 @@ cat > "$out/good.lang" <<'EOF'
 def members : Nat := 3
 EOF
 cat > "$out/limited.lang" <<'EOF'
-def members : Nat := 15
+def members : Nat := 64
 def F : ChoiceRule := fun (x : Config) => release
 def agg : Aggregation F := mkAgg F (fun (t : Tally) => release) (fun (x : Config) => reflDec release)
 EOF
