@@ -41,3 +41,12 @@ exit 0
 {"type":"event","name":"Paid","inputs":[{"name":"to","type":"address","indexed":false},{"name":"amount","type":"uint256","indexed":false}],"anonymous":false}
 ]
 exit 0
+# examples/events.lang --json
+langc: USAGE: -: abi takes only --text after the program
+usage: langc check PROG
+       langc eval PROG NAME [ARGS...]
+       langc run PROG SCRIPT
+       langc ir PROG
+       langc abi PROG [--text]
+       langc build PROG [-o OUT] [--runtime]
+exit 2

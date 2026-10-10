@@ -9,4 +9,6 @@
 9 paidSum = 20u
 10 weighted = 7193u
 11 settle ok
-state makeState 20u (cons 3u (cons 9u (cons 1u (cons 7u nil))))
+12 settleWith ok
+13 paidSum = 20u
+state makeState 25u (cons 3u (cons 9u (cons 1u (cons 7u nil))))

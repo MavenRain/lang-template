@@ -16,6 +16,10 @@ def wipe : (env : Env) -> (s : State) -> Option (Prod State (List Out)) :=
 def settle : (env : Env) -> (s : State) -> Option (Prod State (List Out)) :=
   fun (env : Env) (s : State) => some (pair (makeState (fold (fun (x : U256) (acc : U256) => u256Add x acc) 0u (paid s)) (paid s)) nil)
 
+-- A fold over a cons chain on the field: eval gives u256Add x (fold f 0u (paid s)) (O-c13-1). The List does not change.
+def settleWith : (env : Env) -> (s : State) -> (x : U256) -> Option (Prod State (List Out)) :=
+  fun (env : Env) (s : State) (x : U256) => some (pair (makeState (fold (fun (y : U256) (acc : U256) => u256Add y acc) 0u (cons x (paid s))) (paid s)) nil)
+
 def paidSum : (env : Env) -> (s : State) -> U256 :=
   fun (env : Env) (s : State) => fold (fun (x : U256) (acc : U256) => u256Add x acc) 0u (paid s)
 

@@ -120,6 +120,12 @@ for _p in examples/contract.lang examples/events.lang; do
   build/langc abi "$_p" 2>&1
   echo "exit $?"
 done >>"$tmp/abi.got"
+# A flag other than --text after the program is a USAGE error (C-c7-1, O-c14-1).
+{
+  echo "# examples/events.lang --json"
+  build/langc abi examples/events.lang --json 2>&1
+  echo "exit $?"
+} >>"$tmp/abi.got"
 if ! cmp -s test/abi.expect "$tmp/abi.got"; then
   echo "FAIL evm abi: the langc abi lines differ from test/abi.expect"
   diff test/abi.expect "$tmp/abi.got" | head -n 6

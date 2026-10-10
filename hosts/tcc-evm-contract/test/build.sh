@@ -135,6 +135,12 @@ expect() {
   [ "$2" = "$3" ] || { echo "FAIL build output $1: want $2, got $3"; fail=$((fail + 1)); }
 }
 
+# The REFUSE_LOWER message of a List field value names the whole value (O-c11-1, O-c14-1).
+status=0
+build/langc build test/lower/list-write.lang >/dev/null 2>"$tmp/err" || status=$?
+expect 'list-write exit' 1 "$status"
+expect 'list-write message' 'langc: REFUSE_LOWER: replace: K4c does not lower cons as a List field value (want cons over the old field, or nil)' "$(head -n 1 "$tmp/err")"
+
 # `-o OUT` writes the bytes of stdout. A refused build keeps an existing OUT
 # and makes no new OUT.
 build/langc build examples/storage.lang >"$tmp/ref.hex"
