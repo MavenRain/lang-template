@@ -6,5 +6,6 @@ option.lang REFUSE_LOWER
 prod.lang REFUSE_LOWER
 records.lang REFUSE_LOWER
 list-write.lang REFUSE_LOWER
+list-nil-tail.lang REFUSE_LOWER
 nat-fold.lang REFUSE_LOWER
 emit.lang REFUSE_LOWER

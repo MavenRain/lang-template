@@ -1,14 +1,16 @@
-1 wipe ok
-2 paidSum = 0u
-3 pushOne ok
-4 paidSum = 7u
-5 pushTwo ok
-6 paidSum = 17u
-7 weighted = 719u
-8 pushOne ok
-9 paidSum = 20u
-10 weighted = 7193u
-11 settle ok
-12 settleWith ok
-13 paidSum = 20u
+1 over = 115792089237316195423570985008687907853269984665640564039457584007913129639935u
+2 wipe ok
+3 paidSum = 0u
+4 pushOne ok
+5 paidSum = 7u
+6 pushTwo ok
+7 paidSum = 17u
+8 weighted = 719u
+9 pushOne ok
+10 paidSum = 20u
+11 weighted = 7193u
+12 settle ok
+13 settleWith ok
+14 paidSum = 20u
+15 over trap
 state makeState 25u (cons 3u (cons 9u (cons 1u (cons 7u nil))))

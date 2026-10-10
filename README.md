@@ -36,6 +36,7 @@ Choose the host by the target.
 | tcc-evm-dao | EVM bytecode for a self-constituting DAO, with the verdict table in the contract | `build/langc` (TinyCC) | [`hosts/tcc-evm-dao/README.md`](hosts/tcc-evm-dao/README.md) |
 | tcc-evm-anchor | EVM bytecode for one governed log of hash and time pairs, with the outcome table in the contract | `build/langc` (TinyCC) | [`hosts/tcc-evm-anchor/README.md`](hosts/tcc-evm-anchor/README.md) |
 | tcc-js | An ES module that evaluates the program in JS, and the tcc-json JSON document | `build/langc` (TinyCC) | [`hosts/tcc-js/README.md`](hosts/tcc-js/README.md) |
+| tcc-media | Media primitives with a JSON scaffold | `build/langc` (TinyCC) | [`hosts/tcc-media/README.md`](hosts/tcc-media/README.md) |
 
 The realization matrix in `formers/FORMERS.md` section 5 gives the status of
 each former on each host. Read it before you choose. For example, assay
@@ -49,9 +50,9 @@ bin/new-lang.sh NAME HOST [DEST]
 ```
 
 - `NAME` is the language name. It must match `^[a-z][a-z0-9-]*$`.
-  The `tcc-json` and `tcc-js` hosts reserve `instances` for their JSON
+  The `tcc-json`, `tcc-js` and `tcc-media` hosts reserve `instances` for their JSON
   document key.
-- `HOST` is `mech`, `assay`, `tcc-json`, `tcc-evm-contract`, `tcc-wasm`, `tcc-evm`, `tcc-evm-dao`, `tcc-evm-anchor` or `tcc-js`.
+- `HOST` is `mech`, `assay`, `tcc-json`, `tcc-evm-contract`, `tcc-wasm`, `tcc-evm`, `tcc-evm-dao`, `tcc-evm-anchor`, `tcc-js` or `tcc-media`.
 - `DEST` is the new directory. The default is `../NAME` beside the template
   root. The script refuses a `DEST` that exists.
 
@@ -92,7 +93,7 @@ replaces `{{LANG}}` with `NAME` and `{{HOST}}` with `HOST`. It runs
 | `docs/STATUS.template.md`, `docs/VALIDATION.template.md` | The status and validation forms |
 | `bin/new-lang.sh` | Makes a new language |
 | `bin/doc-check.pl` | The check behind `make doc-check` |
-| `hosts/mech/`, `hosts/assay/`, `hosts/tcc-json/`, `hosts/tcc-evm-contract/`, `hosts/tcc-wasm/`, `hosts/tcc-evm/`, `hosts/tcc-evm-dao/`, `hosts/tcc-evm-anchor/`, `hosts/tcc-js/` | The host kits |
+| `hosts/mech/`, `hosts/assay/`, `hosts/tcc-json/`, `hosts/tcc-evm-contract/`, `hosts/tcc-wasm/`, `hosts/tcc-evm/`, `hosts/tcc-evm-dao/`, `hosts/tcc-evm-anchor/`, `hosts/tcc-js/`, `hosts/tcc-media/` | The host kits |
 
 ## Gates
 

@@ -141,6 +141,12 @@ build/langc build test/lower/list-write.lang >/dev/null 2>"$tmp/err" || status=$
 expect 'list-write exit' 1 "$status"
 expect 'list-write message' 'langc: REFUSE_LOWER: replace: K4c does not lower cons as a List field value (want cons over the old field, or nil)' "$(head -n 1 "$tmp/err")"
 
+# The message names the whole value, not the tail of the chain: here the tail is nil (O-c15-1).
+status=0
+build/langc build test/lower/list-nil-tail.lang >/dev/null 2>"$tmp/err" || status=$?
+expect 'list-nil-tail exit' 1 "$status"
+expect 'list-nil-tail message' 'langc: REFUSE_LOWER: single: K4c does not lower cons as a List field value (want cons over the old field, or nil)' "$(head -n 1 "$tmp/err")"
+
 # `-o OUT` writes the bytes of stdout. A refused build keeps an existing OUT
 # and makes no new OUT.
 build/langc build examples/storage.lang >"$tmp/ref.hex"

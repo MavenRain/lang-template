@@ -53,6 +53,11 @@ check: doc-check test
 	else \
 	  echo "check: skip hosts/tcc-js (no Makefile)"; \
 	fi
+	@if [ -f hosts/tcc-media/Makefile ]; then \
+	  $(MAKE) -C hosts/tcc-media check; \
+	else \
+	  echo "check: skip hosts/tcc-media (no Makefile)"; \
+	fi
 	@if [ -d hosts/tcc-wasm ] && [ -d hosts/tcc-evm ]; then \
 	  for path in $(TCC_SHARED); do \
 	    diff -r hosts/tcc-wasm/$$path hosts/tcc-evm/$$path || exit 1; \
@@ -68,3 +73,4 @@ doc-check:
 
 test:
 	@python3 -B -m unittest discover -s tests -v
+	@bash test/new-lang.sh

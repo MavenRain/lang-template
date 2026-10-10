@@ -29,7 +29,7 @@ set -euo pipefail
 # The host kits. This is the only list of hosts: the usage text and the
 # refusal print it. Each entry is the kit hosts/HOST and needs an arm in the
 # gate case below.
-hosts=(mech assay tcc-json tcc-evm-contract tcc-wasm tcc-evm tcc-evm-dao tcc-evm-anchor tcc-js)
+hosts=(mech assay tcc-json tcc-evm-contract tcc-wasm tcc-evm tcc-evm-dao tcc-evm-anchor tcc-js tcc-media)
 
 # Print the hosts as "a, b or c".
 host_list() {
@@ -74,11 +74,11 @@ known_host "$host" || refuse "unknown HOST '$host': use $(host_list)"
 case $host in
   mech) gate="make check test" ;;
   assay) gate="bash gate.sh" ;;
-  tcc-json | tcc-evm-contract | tcc-wasm | tcc-evm | tcc-evm-dao | tcc-evm-anchor | tcc-js) gate="make check" ;;
+  tcc-json | tcc-evm-contract | tcc-wasm | tcc-evm | tcc-evm-dao | tcc-evm-anchor | tcc-js | tcc-media) gate="make check" ;;
   *) refuse "HOST '$host' has no gate command: add it to the gate case in bin/new-lang.sh" ;;
 esac
-# The tcc-js kit writes the same JSON document as the tcc-json kit (--json).
-[[ $name != instances || ($host != tcc-json && $host != tcc-js) ]] || refuse "NAME 'instances' is reserved by the tcc-json document format"
+# These hosts write a JSON document with an instances key.
+[[ $name != instances || ($host != tcc-json && $host != tcc-js && $host != tcc-media) ]] || refuse "NAME 'instances' is reserved by the tcc-json document format"
 kit=$root/hosts/$host
 [[ -d $kit ]] || refuse "the host kit hosts/$host is missing"
 [[ ! -e $dest && ! -L $dest ]] || refuse "DEST '$dest' exists"
