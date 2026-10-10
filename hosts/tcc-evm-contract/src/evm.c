@@ -100,21 +100,6 @@ static int selector(const IrFunc *fn, uint64_t *out) {
   return 1;
 }
 
-static EvmBuild program_selectors(const IrProgram *prog, uint64_t *hits) {
-  if (prog->func_count > ASM_LABELS) return EVM_BUILD_SIZE;
-  for (size_t i = 0; i < prog->func_count; i++) {
-    if (!selector(&prog->funcs[i], &hits[i])) return EVM_BUILD_SIGNATURE;
-    for (size_t j = 0; j < i; j++)
-      if (hits[j] == hits[i]) return EVM_BUILD_SELECTOR;
-  }
-  return EVM_BUILD_OK;
-}
-
-EvmBuild evm_abi_check(const IrProgram *prog) {
-  uint64_t hits[ASM_LABELS];
-  return program_selectors(prog, hits);
-}
-
 /* The number of low bits that a clean argument word can use (C-K4-6).
    256 = all words are clean. */
 static unsigned scalar_bits(IrScalar s) {
@@ -354,8 +339,12 @@ static int evm_entry(Emit *e, const IrFunc *fn, Label label) {
    views come after it. */
 static EvmBuild evm_runtime(Asm *a, const IrProgram *prog, Label first) {
   uint64_t hits[ASM_LABELS];
-  EvmBuild status = program_selectors(prog, hits);
-  if (status != EVM_BUILD_OK) return status;
+  if (prog->func_count > ASM_LABELS) return EVM_BUILD_SIZE;
+  for (size_t i = 0; i < prog->func_count; i++) {
+    if (!selector(&prog->funcs[i], &hits[i])) return EVM_BUILD_SIGNATURE;
+    for (size_t j = 0; j < i; j++)
+      if (hits[j] == hits[i]) return EVM_BUILD_SELECTOR;
+  }
   Emit e = {a, 0, asm_label(a), asm_label(a), EVM_BUILD_IR};
   asm_op(a, EVM_OP_CALLVALUE);
   asm_jump_if(a, e.revert);
@@ -420,8 +409,8 @@ EvmBuild evm_build(const IrProgram *prog, const unsigned char (*pairs)[64], size
   EvmBuild result = stores->full || !asm_finish(runtime, sink) || runtime->size > ASM_RUNTIME_MAX
                         || (part != TARGET_PART_RUNTIME && !asm_creation_store(code, stores, runtime, sink))
                         ? EVM_BUILD_SIZE
-                    : asm_write_hex(part == TARGET_PART_RUNTIME ? runtime : code, out, sink) ? EVM_BUILD_OK
-                                                                                            : EVM_BUILD_WRITE;
+                    : out == NULL || asm_write_hex(part == TARGET_PART_RUNTIME ? runtime : code, out, sink)
+                        ? EVM_BUILD_OK : EVM_BUILD_WRITE;
   fclose(sink);
   free(a);
   return result;

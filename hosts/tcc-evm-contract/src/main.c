@@ -130,13 +130,14 @@ static const char *command_word(Command command) {
   return "?";
 }
 
-/* `langc build` (slice K4a): the code goes to a tmpfile first, so a refused
-   or failed build writes nothing on stdout or on OUT. Returns 0, 1 after a
-   refusal, or 2 after an IO_WRITE diagnostic. */
-static int build_command(Machine *m, const Options *opt, Diag *diag) {
+/* Build code and ABI lines go to a tmpfile first, so a refused command
+   writes nothing on stdout or on OUT. Returns 0, 1 after a refusal, or 2
+   after an IO_WRITE diagnostic. */
+static int output_command(Machine *m, const Options *opt, Diag *diag) {
   FILE *code = tmpfile();
   if (code == NULL) return diag_fail(diag, "IO_WRITE", NULL, "tmpfile: %s", strerror(errno)) + 2;
-  int status = lower_build(m, opt->runtime ? TARGET_PART_RUNTIME : TARGET_PART_MAIN, code);
+  int status = opt->command == CMD_ABI ? lower_abi(m, code)
+    : lower_build(m, opt->runtime ? TARGET_PART_RUNTIME : TARGET_PART_MAIN, code);
   if (status != 0) {
     fclose(code);
     return status;
@@ -183,9 +184,8 @@ static int run(const Options *opt, Arena *arena, Diag *diag) {
       return run_command(&machine, opt->script_path, script, script_len, stdout);
     }
     case CMD_BUILD:
-      return build_command(&machine, opt, diag);
     case CMD_ABI:
-      return lower_abi(&machine, stdout);
+      return output_command(&machine, opt, diag);
     case CMD_IR:
       break;
   }

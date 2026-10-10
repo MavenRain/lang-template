@@ -633,34 +633,38 @@ static int lower_state_ctor(Machine *m, const CtorInfo **ci_out, uint32_t *init_
   return 0;
 }
 
-/* Checks the closed initial state and counts its storage words in PAIRS. */
-static const Value *lower_init(Machine *m, const CtorInfo *ci, uint32_t init, Pairs *pairs) {
-  m->def = "init";
-  m->fuel = EVAL_FUEL_STEPS;
-  const Value *state = def_value(m, init);
-  if (state == NULL) return NULL;
-  if (!val_is(state, OP_CTOR) || state->argc != ci->field_count) {
-    diag_fail(m->diag, "REFUSE_LOWER", "init", "the value of init is not a closed state");
-    return NULL;
-  }
-  return lower_state(m, ci, state, pairs) ? state : NULL;
-}
-
-/* `langc abi` (C-K4-16): one line for each entry and view in source order,
-   then one line for each event in declaration order. The program must lower
-   as for `langc build`. */
-int lower_abi(Machine *m, FILE *out) {
+/* Shared lowering of the functions and closed initial storage for build
+   and ABI output. Returns 0, or 1 after a diagnostic. */
+static int lower_contract(Machine *m, IrProgram *program, const char **kinds, Pairs *pairs) {
   const CtorInfo *ci = NULL;
   uint32_t init = 0;
   int refused = lower_state_ctor(m, &ci, &init);
   if (refused != 0) return refused;
+  if (!lower_entries(m, ci, program, kinds)) return 1;
+  m->def = "init";
+  m->fuel = EVAL_FUEL_STEPS;
+  const Value *state = def_value(m, init);
+  if (state == NULL) return 1;
+  if (!val_is(state, OP_CTOR) || state->argc != ci->field_count)
+    return diag_fail(m->diag, "REFUSE_LOWER", "init", "the value of init is not a closed state") + 1;
+  if (!lower_state(m, ci, state, pairs)) return 1;
+  pairs->at = pairs->count > 0 ? arena_alloc(m->arena, pairs->count * 64u) : NULL;
+  if (pairs->count > 0 && pairs->at == NULL) return diag_fail(m->diag, "OOM", NULL, "out of memory") + 1;
+  pairs->count = 0;
+  return lower_state(m, ci, state, pairs) ? 0 : 1;
+}
+
+/* `langc abi` (C-K4-16): one line for each entry and view in source order,
+   then one line for each event in declaration order. Validate the full
+   creation code before writing any line. */
+int lower_abi(Machine *m, FILE *out) {
   const char **kinds = m->def_count > 0 ? arena_alloc(m->arena, m->def_count * sizeof *kinds) : NULL;
   IrProgram program = {NULL, 0};
-  if (m->def_count > 0 && kinds == NULL) return build_status(m, EVM_BUILD_OOM);
-  if (!lower_entries(m, ci, &program, kinds)) return 1;
   Pairs pairs = {NULL, 0};
-  if (lower_init(m, ci, init, &pairs) == NULL) return 1;
-  EvmBuild checked = evm_abi_check(&program);
+  if (m->def_count > 0 && kinds == NULL) return build_status(m, EVM_BUILD_OOM);
+  int refused = lower_contract(m, &program, kinds, &pairs);
+  if (refused != 0) return refused;
+  EvmBuild checked = evm_build(&program, (const unsigned char (*)[64])pairs.at, pairs.count, TARGET_PART_MAIN, NULL);
   if (checked != EVM_BUILD_OK) return build_status(m, checked);
   for (size_t k = 0; k < program.func_count; k++) {
     const IrFunc *f = &program.funcs[k];
@@ -680,18 +684,9 @@ int lower_abi(Machine *m, FILE *out) {
 }
 
 int lower_build(Machine *m, TargetPart part, FILE *out) {
-  const CtorInfo *ci = NULL;
-  uint32_t init = 0;
-  int refused = lower_state_ctor(m, &ci, &init);
-  if (refused != 0) return refused;
   IrProgram program = {NULL, 0};
-  if (!lower_entries(m, ci, &program, NULL)) return 1;
   Pairs pairs = {NULL, 0};
-  const Value *state = lower_init(m, ci, init, &pairs);
-  if (state == NULL) return 1;
-  pairs.at = pairs.count > 0 ? arena_alloc(m->arena, pairs.count * 64u) : NULL;
-  if (pairs.count > 0 && pairs.at == NULL) return diag_fail(m->diag, "OOM", NULL, "out of memory") + 1;
-  pairs.count = 0;
-  if (!lower_state(m, ci, state, &pairs)) return 1;
+  int refused = lower_contract(m, &program, NULL, &pairs);
+  if (refused != 0) return refused;
   return build_status(m, evm_build(&program, (const unsigned char (*)[64])pairs.at, pairs.count, part, out));
 }

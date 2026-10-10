@@ -1,6 +1,8 @@
 /* Residual lowering regressions exercise checked source and the resulting IR. */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 
 #include "front/check.h"
 #include "front/front.h"
@@ -86,12 +88,42 @@ static int regression(const char *name, const char *defs, size_t functions,
   return ok;
 }
 
-#define ENTRY "def entry : Env -> State -> Option (Prod State (List Out)) := fun env s => "
-#define TOKEN "0x00000000000000000000000000000000000000aa"
+static int abi_regression(const char *name, const char *source, const char *code, const char *expected) {
+  Arena arena;
+  Diag diag;
+  DeclList decls;
+  Machine machine;
+  FILE *out = tmpfile();
+  if (out == NULL) return 0;
+  arena_init(&arena, (size_t)1 << 25);
+  diag_init(&diag);
+  int ok = front_load(&arena, name, source, strlen(source), &decls, &diag)
+    && check_program(&arena, &decls, &machine, &diag);
+  if (ok) {
+    int status = lower_abi(&machine, out);
+    if (code != NULL) {
+      ok = status == 1 && diag.code != NULL && strcmp(diag.code, code) == 0 && ftell(out) == 0;
+    } else {
+      char text[1024];
+      rewind(out);
+      size_t count = fread(text, 1, sizeof text - 1, out);
+      text[count] = '\0';
+      ok = status == 0 && !diag.set && !ferror(out) && feof(out) && strcmp(text, expected) == 0;
+    }
+  }
+  if (!ok) {
+    fprintf(stderr, "FAIL abi %s\n", name);
+    if (diag.set) diag_print(&diag, stderr);
+  }
+  fclose(out);
+  arena_release(&arena);
+  return ok;
+}
+
 #define ABI_STATE "state State := makeState (counter : Nat)\ndef init : State := makeState 0\n"
 #define ABI_ENTRY_TYPE " : Env -> State -> Option (Prod State (List Out)) := fun env s => some (pair s nil)\n"
 
-static int abi_regression(const char *name, const char *source, const char *code, long bytes) {
+static int abi_size_regression(const char *name, const char *source, const char *code, long bytes) {
   Arena arena;
   Diag diag;
   DeclList decls;
@@ -122,31 +154,49 @@ static int abi_boundaries(void) {
   memset(name, 'a', sizeof name);
   name[253] = '\0';
   snprintf(source, sizeof source, ABI_STATE "def %s" ABI_ENTRY_TYPE, name);
-  int ok = abi_regression("signature-255", source, NULL, 273);
+  int ok = abi_size_regression("signature-255", source, NULL, 273);
   name[253] = 'a'; name[254] = '\0';
   snprintf(source, sizeof source, ABI_STATE "def good" ABI_ENTRY_TYPE "def %s" ABI_ENTRY_TYPE, name);
-  ok &= abi_regression("signature-256", source, "EVM_SIGNATURE", 0);
+  ok &= abi_size_regression("signature-256", source, "EVM_SIGNATURE", 0);
   snprintf(source, sizeof source, ABI_STATE "event %s\n", name);
-  ok &= abi_regression("event-signature-256", source, NULL, 330);
+  ok &= abi_size_regression("event-signature-256", source, NULL, 330);
   return ok;
 }
 
+#define ENTRY "def entry : Env -> State -> Option (Prod State (List Out)) := fun env s => "
+#define TOKEN "0x00000000000000000000000000000000000000aa"
+
 int main(void) {
   int ok = 1;
-  ok &= abi_regression("entry-collision", ABI_STATE
+  ok &= abi_regression("init-trap",
+    "state State := makeState (n : U256)\n"
+    "def init : State := makeState (u256Div 1u 0u)\n"
+    "def value : Env -> State -> U256 := fun env s => n s\n", "REFUSE_LOWER", NULL);
+  ok &= abi_regression("selector-collision",
+    "state State := makeState (n : Nat)\n"
+    "def init : State := makeState 0\n"
+    "def collision39027 : Env -> State -> Nat := fun env s => n s\n"
+    "def collision109357 : Env -> State -> Option (Prod State (List Out)) := "
+    "fun env s => some (pair s nil)\n", "EVM_SELECTOR", NULL);
+  ok &= abi_regression("no-functions",
+    "event Opened\nstate State := makeState (n : Nat)\n"
+    "def init : State := makeState 0\n", NULL,
+    "0xd1dcd00534373f20882b79e6ab6875a5c358c5bd576448757ed50e63069ab518 Opened() event\n");
+  ok &= abi_size_regression("entry-collision", ABI_STATE
     "def entry37557" ABI_ENTRY_TYPE "def entry9660" ABI_ENTRY_TYPE,
     "EVM_SELECTOR", 0);
-  ok &= abi_regression("reverse-entry-collision", ABI_STATE
+  ok &= abi_size_regression("reverse-entry-collision", ABI_STATE
     "def entry9660" ABI_ENTRY_TYPE "def entry37557" ABI_ENTRY_TYPE,
     "EVM_SELECTOR", 0);
-  ok &= abi_regression("entry-view-collision", ABI_STATE
+  ok &= abi_size_regression("entry-view-collision", ABI_STATE
     "def entry37557" ABI_ENTRY_TYPE "def entry9660 : Env -> State -> Nat := fun env s => 0\n",
     "EVM_SELECTOR", 0);
-  ok &= abi_regression("init-trap",
-    "state State := makeState (counter : U256)\n"
-    "def init : State := makeState (u256Div 1u 0u)\n"
-    ENTRY "some (pair s nil)\n", "REFUSE_LOWER", 0);
   ok &= abi_boundaries();
+  int output_status = system("build/langc abi examples/contract.lang 1</dev/null 2>/dev/null");
+  if (output_status == -1 || !WIFEXITED(output_status) || WEXITSTATUS(output_status) != 2) {
+    fprintf(stderr, "FAIL abi buffered-write (status %d)\n", output_status);
+    ok = 0;
+  }
   ok &= regression("helper-pair",
     "def helper : Env -> State -> Option (Prod Nat Nat) := fun env s => some (pair 1 2)\n",
     0, 0, 0, 0, 0, 0);
