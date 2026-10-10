@@ -72,13 +72,67 @@ static int regression(const char *name, const char *defs, size_t functions,
       }
       ok = trap_at < store_at;
     }
-    if (ok && traps > 0 && branches == 1) {
+    if (ok && traps > 0 && branches > 0) {
+      /* The first IF holds the words. A flagIf in the Out list with effects
+         gives a second IF after the state write (C-K4d-2). */
       const IrStmt *branch = NULL;
       for (size_t i = 0; i < f->body.count; i++)
-        if (f->body.items[i]->kind == IR_STMT_IF) branch = f->body.items[i];
+        if (f->body.items[i]->kind == IR_STMT_IF && branch == NULL) branch = f->body.items[i];
       ok = branch != NULL && statements(branch->body, IR_STMT_TRAP) == 0
         && statements(branch->otherwise, IR_STMT_TRAP) == traps;
     }
+  }
+  if (!ok) {
+    fprintf(stderr, "FAIL lower %s (functions %zu)\n", name, program.func_count);
+    if (diag.set) diag_print(&diag, stderr);
+  }
+  arena_release(&arena);
+  return ok;
+}
+
+/* C-K4d-2: each statement of the entry body that holds a LOG comes after the
+   last SSTORE (if any), and the body ends with STOP. With LOCAL_COND, that
+   statement is an IF on a local (the stores can change a storage word in the
+   condition), and its LOG is in the else branch (the flagIf no branch). */
+static int order_regression(const char *name, const char *defs, int local_cond) {
+  const char *prefix = "state State := makeState (counter : Nat)\n"
+    "def init : State := makeState 0\n";
+  char source[4096];
+  Arena arena;
+  Diag diag;
+  DeclList decls;
+  Machine machine;
+  IrProgram program = {NULL, 0};
+  int ok;
+  snprintf(source, sizeof source, "%s%s", prefix, defs);
+  arena_init(&arena, (size_t)1 << 25);
+  diag_init(&diag);
+  ok = front_load(&arena, name, source, strlen(source), &decls, &diag)
+    && check_program(&arena, &decls, &machine, &diag);
+  if (ok) {
+    const CtorInfo *ci = &machine.ctors[machine.families[machine.state_family].first_ctor];
+    ok = lower_entries(&machine, ci, &program, NULL);
+  }
+  ok = ok && diag.code == NULL && program.func_count == 1;
+  if (ok) {
+    IrBlock body = program.funcs[0].body;
+    size_t last_store = 0; /* 1 + the position of the last SSTORE */
+    size_t first_log = 0;  /* 1 + the position of the first statement with a LOG */
+    const IrStmt *holder = NULL;
+    for (size_t i = 0; i < body.count; i++) {
+      const IrStmt *s = body.items[i];
+      unsigned logs = (s->kind == IR_STMT_LOG) + statements(s->body, IR_STMT_LOG)
+        + statements(s->otherwise, IR_STMT_LOG);
+      if (s->kind == IR_STMT_SSTORE) last_store = i + 1;
+      if (logs > 0 && holder == NULL) {
+        first_log = i + 1;
+        holder = s;
+      }
+    }
+    ok = holder != NULL && first_log > last_store
+      && body.items[body.count - 1]->kind == IR_STMT_STOP
+      && (!local_cond || (holder->kind == IR_STMT_IF && holder->expr->kind == IR_EXPR_LOCAL
+                          && statements(holder->body, IR_STMT_LOG) == 0));
   }
   if (!ok) {
     fprintf(stderr, "FAIL lower %s (functions %zu)\n", name, program.func_count);
@@ -309,7 +363,13 @@ int main(void) {
   ok &= regression("lazy-output-list", LOGGED
     "def entry : Env -> State -> Flag -> Option (Prod State (List Out)) := fun env s f => "
     "some (pair (makeState 9) (flagIf f nil (cons (Logged (u256Div 7u 0u)) nil)))\n",
-    1, 1, 1, 0, 1, 0);
+    1, 1, 1, 0, 2, 0);
+  ok &= order_regression("effect-order", LOGGED ENTRY
+    "some (pair (makeState 9) (cons (Logged 7u) nil))\n", 0);
+  ok &= order_regression("effect-order-same-state", LOGGED ENTRY
+    "some (pair s (cons (Logged 7u) nil))\n", 0);
+  ok &= order_regression("effect-order-stored-flag", LOGGED ENTRY
+    "some (pair (makeState 9) (flagIf (natEq (counter s) 0) nil (cons (Logged 7u) nil)))\n", 1);
   if (ok) puts("lower regressions: passed");
   return ok ? 0 : 1;
 }

@@ -564,10 +564,19 @@ static int lower_list_write(Low *l, Stmts *b, Stmts *stores, const Value *v, uin
   return push_store(l, stores, ir_const(l, field), ir_binary(l, IR_OP_ADD64, n, ir_const(l, count)));
 }
 
-static int lower_state_write(Low *l, Stmts *b, const Value *st) {
+static int push_all(Low *l, Stmts *b, const Stmts *from) {
+  for (size_t k = 0; k < from->count; k++)
+    if (!push(l, b, from->items[k])) return 0;
+  return 1;
+}
+
+/* The state write: force the field words, then the stores, then FX (the LOGs
+   of the Out list, C-K4d-2), then STOP. */
+static int lower_state_write(Low *l, Stmts *b, const Stmts *fx, const Value *st) {
   Stmts stores = {NULL, 0, 0};
   uint32_t f;
-  if (st != NULL && st->kind == VAL_VAR && st->nat == 1u) return push(l, b, new_stmt(l, IR_STMT_STOP));
+  if (st != NULL && st->kind == VAL_VAR && st->nat == 1u)
+    return push_all(l, b, fx) && push(l, b, new_stmt(l, IR_STMT_STOP));
   if (!is_op(st, OP_CTOR) || st->argc != l->state->field_count) return refuse(l, st, "as the new state");
   for (uint32_t i = 0; i < st->argc; i++) {
     const Value *v = st->args[i];
@@ -585,9 +594,7 @@ static int lower_state_write(Low *l, Stmts *b, const Value *st) {
                        l->state->fields[i].name);
     }
   }
-  for (size_t k = 0; k < stores.count; k++)
-    if (!push(l, b, stores.items[k])) return 0;
-  return push(l, b, new_stmt(l, IR_STMT_STOP));
+  return push_all(l, b, &stores) && push_all(l, b, fx) && push(l, b, new_stmt(l, IR_STMT_STOP));
 }
 
 /* 1 when V is the prelude constructor emit of Out. emit has no EVM form, thus
@@ -611,9 +618,9 @@ static const char *out_call(const Low *l, const Value *v) {
 
 static IrScalar scalar_of(const Value *t);
 
-/* An event in the OUT list (C-K4-13): force each field word, then one LOG
-   with the signature of the event and the field words. */
-static int lower_log(Low *l, Stmts *b, const CtorInfo *c, const Value *v) {
+/* An event in the OUT list (C-K4-13): force each field word into B, then put
+   one LOG with the signature of the event and the field words into FX. */
+static int lower_log(Low *l, Stmts *b, Stmts *fx, const CtorInfo *c, const Value *v) {
   const IrExpr **fields = low_alloc(l, (v->argc + 1u) * sizeof *fields);
   IrScalar *types = fields != NULL ? low_alloc(l, (v->argc + 1u) * sizeof *types) : NULL;
   if (types == NULL) return 0;
@@ -628,13 +635,14 @@ static int lower_log(Low *l, Stmts *b, const CtorInfo *c, const Value *v) {
   s->types = types;
   s->fields = fields;
   s->field_count = v->argc;
-  return push(l, b, s);
+  return push(l, fx, s);
 }
 
-/* Force the words of the outputs before any state store, and write one LOG
-   for each event, in the order of the list (C-K4-13). Keep flagIf branches
-   lazy, including at List positions and within event fields. */
-static int lower_out_words(Low *l, Stmts *b, const Value *v) {
+/* Force the words of the outputs into B before any state store, and put one
+   LOG for each event into FX, in the order of the list (C-K4-13). The caller
+   pushes FX after the state write (C-K4d-2). Keep flagIf branches lazy,
+   including at List positions and within event fields. */
+static int lower_out_words(Low *l, Stmts *b, Stmts *fx, const Value *v) {
   uint32_t field;
   const CtorInfo *c = is_op(v, OP_CTOR) && v->inst < l->m->ctor_count ? &l->m->ctors[v->inst] : NULL;
   const char *call = out_call(l, v);
@@ -643,22 +651,34 @@ static int lower_out_words(Low *l, Stmts *b, const Value *v) {
     return diag_fail(l->m->diag, "REFUSE_LOWER", l->entry, "emit has no EVM form; use a named event");
   if (call != NULL)
     return diag_fail(l->m->diag, "REFUSE_LOWER", l->entry, "%s has no EVM form yet; the CALL lowering comes in slice K4d", call);
-  if (c != NULL && c->event) return lower_log(l, b, c, v);
+  if (c != NULL && c->event) return lower_log(l, b, fx, c, v);
   if (is_op(v, OP_FLAG_IF) && v->argc == 3) {
+    /* With effects in a branch, the condition goes into a local: FX tests it
+       again after the state write, which can change a storage word in it. */
     const IrExpr *cond = lower_expr(l, b, v->args[0]);
     Stmts yes = {NULL, 0, 0};
     Stmts no = {NULL, 0, 0};
-    IrStmt *s = cond != NULL && lower_out_words(l, &yes, v->args[1]) && lower_out_words(l, &no, v->args[2])
-                    ? new_stmt(l, IR_STMT_IF) : NULL;
-    if (s == NULL) return 0;
+    Stmts fx_yes = {NULL, 0, 0};
+    Stmts fx_no = {NULL, 0, 0};
+    int ok = cond != NULL && lower_out_words(l, &yes, &fx_yes, v->args[1]) && lower_out_words(l, &no, &fx_no, v->args[2]);
+    int effects = fx_yes.count + fx_no.count > 0;
+    if (ok && effects) cond = ir_set(l, b, cond);
+    IrStmt *s = ok && cond != NULL ? new_stmt(l, IR_STMT_IF) : NULL;
+    IrStmt *t = s != NULL && effects ? new_stmt(l, IR_STMT_IF) : NULL;
+    if (s == NULL || (effects && t == NULL)) return 0;
     s->expr = cond;
     s->body = block_of(&yes);
     s->otherwise = block_of(&no);
-    return push(l, b, s);
+    if (t != NULL) {
+      t->expr = cond;
+      t->body = block_of(&fx_yes);
+      t->otherwise = block_of(&fx_no);
+    }
+    return push(l, b, s) && (t == NULL || push(l, fx, t));
   }
   if (is_op(v, OP_CONS) || is_op(v, OP_CTOR)) {
     for (uint32_t i = 0; i < v->argc; i++)
-      if (!lower_out_words(l, b, v->args[i])) return 0;
+      if (!lower_out_words(l, b, fx, v->args[i])) return 0;
     return 1;
   }
   /* A stored List contains words that were already forced when stored. */
@@ -681,9 +701,11 @@ static int lower_result(Low *l, Stmts *b, const Value *v) {
     s->otherwise = block_of(&no);
     return push(l, b, s);
   }
-  if (is_op(v, OP_SOME) && v->argc >= 1 && is_op(v->args[v->argc - 1], OP_PAIR) && v->args[v->argc - 1]->argc == 2)
-    return lower_out_words(l, b, v->args[v->argc - 1]->args[1])
-           && lower_state_write(l, b, v->args[v->argc - 1]->args[0]);
+  if (is_op(v, OP_SOME) && v->argc >= 1 && is_op(v->args[v->argc - 1], OP_PAIR) && v->args[v->argc - 1]->argc == 2) {
+    Stmts fx = {NULL, 0, 0};
+    return lower_out_words(l, b, &fx, v->args[v->argc - 1]->args[1])
+           && lower_state_write(l, b, &fx, v->args[v->argc - 1]->args[0]);
+  }
   return refuse(l, v, "as an entry result");
 }
 
