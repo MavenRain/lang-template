@@ -30,6 +30,7 @@ typedef struct {
   const char *script_path;
   const char *out_path;
   int runtime;
+  int json;
 } Options;
 
 static const struct {
@@ -49,7 +50,7 @@ static int usage(FILE *err) {
         "       langc eval PROG NAME [ARGS...]\n"
         "       langc run PROG SCRIPT\n"
         "       langc ir PROG\n"
-        "       langc abi PROG\n"
+        "       langc abi PROG [--json]\n"
         "       langc build PROG [-o OUT] [--runtime]\n", err);
   return 2;
 }
@@ -85,8 +86,10 @@ static int parse_options(int argc, char **argv, Options *opt, Diag *diag) {
   switch (opt->command) {
     case CMD_CHECK:
     case CMD_IR:
-    case CMD_ABI:
       return argc == 3 ? 1 : diag_fail(diag, "USAGE", NULL, "too many arguments");
+    case CMD_ABI:
+      opt->json = argc == 4 && strcmp(argv[3], "--json") == 0;
+      return argc == 3 || opt->json ? 1 : diag_fail(diag, "USAGE", NULL, "abi takes only --json after the program");
     case CMD_EVAL:
       if (argc < 4) return diag_fail(diag, "USAGE", NULL, "eval needs a definition name");
       opt->entry = argv[3];
@@ -136,7 +139,7 @@ static const char *command_word(Command command) {
 static int output_command(Machine *m, const Options *opt, Diag *diag) {
   FILE *code = tmpfile();
   if (code == NULL) return diag_fail(diag, "IO_WRITE", NULL, "tmpfile: %s", strerror(errno)) + 2;
-  int status = opt->command == CMD_ABI ? lower_abi(m, code)
+  int status = opt->command == CMD_ABI ? lower_abi(m, code, opt->json)
     : lower_build(m, opt->runtime ? TARGET_PART_RUNTIME : TARGET_PART_MAIN, code);
   if (status != 0) {
     fclose(code);

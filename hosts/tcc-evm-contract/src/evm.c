@@ -24,6 +24,10 @@ static const char *abi_type(IrScalar s) {
   return "uint256";
 }
 
+const char *evm_abi_type(IrScalar s) {
+  return abi_type(s);
+}
+
 /* NAME(TYPE,...) with the ABI type of each of the COUNT TYPES: Nat =
    uint64, Flag = bool, U256 = uint256, Addr = address (an entry, a view or
    an event, C-K4c-4). Returns the length, or 0 when it does not fit. */

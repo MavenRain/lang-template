@@ -41,4 +41,8 @@ EvmBuild evm_build(const IrProgram *prog, const unsigned char (*pairs)[64], size
    than 255 bytes. */
 EvmBuild evm_abi_line(const char *kind, const char *name, const IrScalar *types, size_t count, FILE *out);
 
+/* The ABI type name of a scalar: Nat uint64, Flag bool, U256 uint256, Addr
+   address (C-K4-6). The JSON ABI uses it (Q-K4-3). */
+const char *evm_abi_type(IrScalar s);
+
 #endif

@@ -88,7 +88,7 @@ static int regression(const char *name, const char *defs, size_t functions,
   return ok;
 }
 
-static int abi_regression(const char *name, const char *source, const char *code, const char *expected) {
+static int abi_mode_regression(const char *name, const char *source, const char *code, const char *expected, int json) {
   Arena arena;
   Diag diag;
   DeclList decls;
@@ -100,7 +100,7 @@ static int abi_regression(const char *name, const char *source, const char *code
   int ok = front_load(&arena, name, source, strlen(source), &decls, &diag)
     && check_program(&arena, &decls, &machine, &diag);
   if (ok) {
-    int status = lower_abi(&machine, out);
+    int status = lower_abi(&machine, out, json);
     if (code != NULL) {
       ok = status == 1 && diag.code != NULL && strcmp(diag.code, code) == 0 && ftell(out) == 0;
     } else {
@@ -120,6 +120,10 @@ static int abi_regression(const char *name, const char *source, const char *code
   return ok;
 }
 
+static int abi_regression(const char *name, const char *source, const char *code, const char *expected) {
+  return abi_mode_regression(name, source, code, expected, 0);
+}
+
 #define ABI_STATE "state State := makeState (counter : Nat)\ndef init : State := makeState 0\n"
 #define ABI_ENTRY_TYPE " : Env -> State -> Option (Prod State (List Out)) := fun env s => some (pair s nil)\n"
 
@@ -135,7 +139,7 @@ static int abi_size_regression(const char *name, const char *source, const char 
   int ok = front_load(&arena, name, source, strlen(source), &decls, &diag)
     && check_program(&arena, &decls, &machine, &diag);
   if (ok) {
-    int result = lower_abi(&machine, out);
+    int result = lower_abi(&machine, out, 0);
     ok = (code == NULL ? result == 0 && diag.code == NULL
                       : result == 1 && diag.code != NULL && strcmp(diag.code, code) == 0)
       && ftell(out) == bytes;
@@ -191,6 +195,16 @@ int main(void) {
   ok &= abi_size_regression("entry-view-collision", ABI_STATE
     "def entry37557" ABI_ENTRY_TYPE "def entry9660 : Env -> State -> Nat := fun env s => 0\n",
     "EVM_SELECTOR", 0);
+  ok &= abi_mode_regression("json",
+    "event Paid (amount : U256)\nstate State := makeState (n : Nat)\n"
+    "def init : State := makeState 0\n"
+    "def readout : Env -> State -> Nat := fun env s => n s\n"
+    ENTRY "some (pair s nil)\n", NULL,
+    "[\n"
+    "{\"type\":\"function\",\"name\":\"readout\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint64\"}],\"stateMutability\":\"view\"},\n"
+    "{\"type\":\"function\",\"name\":\"entry\",\"inputs\":[],\"outputs\":[],\"stateMutability\":\"nonpayable\"},\n"
+    "{\"type\":\"event\",\"name\":\"Paid\",\"inputs\":[{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false}],\"anonymous\":false}\n"
+    "]\n", 1);
   ok &= abi_boundaries();
   int output_status = system("build/langc abi examples/contract.lang 1</dev/null 2>/dev/null");
   if (output_status == -1 || !WIFEXITED(output_status) || WEXITSTATUS(output_status) != 2) {

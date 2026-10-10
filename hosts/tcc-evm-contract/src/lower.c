@@ -654,10 +654,30 @@ static int lower_contract(Machine *m, IrProgram *program, const char **kinds, Pa
   return lower_state(m, ci, state, pairs) ? 0 : 1;
 }
 
+/* One item of the JSON ABI (Q-K4-3) for the entry or view NAME of KIND, or
+   for the event E (KIND "event"), after INDEX items. The inputs of an entry
+   or a view have the name "" (the residual has no argument names); the
+   inputs of an event have its field names. */
+static EvmBuild abi_json_item(FILE *out, size_t index, const char *kind, const char *name,
+                              const IrScalar *types, size_t count, const CtorInfo *e, IrScalar result) {
+  /* Role 0 is an entry, 1 a view, 2 an event. */
+  static const char *const tail_open[] = {",\"outputs\":[]", ",\"outputs\":[{\"name\":\"\",\"type\":\"", ",\"anonymous\":false"};
+  static const char *const tail_close[] = {",\"stateMutability\":\"nonpayable\"}", "\"}],\"stateMutability\":\"view\"}", "}"};
+  size_t role = e != NULL ? 2u : (size_t)(strcmp(kind, "view") == 0);
+  fprintf(out, "%s{\"type\":\"%s\",\"name\":\"%s\",\"inputs\":[", index == 0 ? "\n" : ",\n",
+          role == 2 ? "event" : "function", name);
+  for (size_t i = 0; i < count; i++)
+    fprintf(out, "%s{\"name\":\"%s\",\"type\":\"%s\"%s}", i == 0 ? "" : ",", role == 2 ? e->fields[i].name : "",
+            evm_abi_type(types[i]), role == 2 ? ",\"indexed\":false" : "");
+  fprintf(out, "]%s%s%s", tail_open[role], role == 1 ? evm_abi_type(result) : "", tail_close[role]);
+  return ferror(out) ? EVM_BUILD_WRITE : EVM_BUILD_OK;
+}
+
 /* `langc abi` (C-K4-16): one line for each entry and view in source order,
-   then one line for each event in declaration order. Validate the full
-   creation code before writing any line. */
-int lower_abi(Machine *m, FILE *out) {
+   then one line for each event in declaration order. With JSON, one
+   Solidity JSON ABI array of the same items in the same order (Q-K4-3).
+   Validate the full creation code before writing any output. */
+int lower_abi(Machine *m, FILE *out, int json) {
   const char **kinds = m->def_count > 0 ? arena_alloc(m->arena, m->def_count * sizeof *kinds) : NULL;
   IrProgram program = {NULL, 0};
   Pairs pairs = {NULL, 0};
@@ -666,9 +686,12 @@ int lower_abi(Machine *m, FILE *out) {
   if (refused != 0) return refused;
   EvmBuild checked = evm_build(&program, (const unsigned char (*)[64])pairs.at, pairs.count, TARGET_PART_MAIN, NULL);
   if (checked != EVM_BUILD_OK) return build_status(m, checked);
+  size_t index = 0;
+  if (json) fputc('[', out);
   for (size_t k = 0; k < program.func_count; k++) {
     const IrFunc *f = &program.funcs[k];
-    EvmBuild status = evm_abi_line(kinds[k], f->name, f->params, f->param_count, out);
+    EvmBuild status = json ? abi_json_item(out, index++, kinds[k], f->name, f->params, f->param_count, NULL, f->result)
+                           : evm_abi_line(kinds[k], f->name, f->params, f->param_count, out);
     if (status != EVM_BUILD_OK) return build_status(m, status);
   }
   for (uint32_t c = 0; c < m->ctor_count; c++) {
@@ -677,10 +700,12 @@ int lower_abi(Machine *m, FILE *out) {
     IrScalar *types = e->field_count > 0 ? arena_alloc(m->arena, e->field_count * sizeof *types) : NULL;
     if (e->field_count > 0 && types == NULL) return build_status(m, EVM_BUILD_OOM);
     for (uint32_t i = 0; i < e->field_count; i++) types[i] = scalar_of(field_type(m, e, i));
-    EvmBuild status = evm_abi_line("event", e->name, types, e->field_count, out);
+    EvmBuild status = json ? abi_json_item(out, index++, "event", e->name, types, e->field_count, e, IR_SCALAR_NAT)
+                           : evm_abi_line("event", e->name, types, e->field_count, out);
     if (status != EVM_BUILD_OK) return build_status(m, status);
   }
-  return 0;
+  if (json) fputs(index == 0 ? "]\n" : "\n]\n", out);
+  return ferror(out) ? build_status(m, EVM_BUILD_WRITE) : 0;
 }
 
 int lower_build(Machine *m, TargetPart part, FILE *out) {

@@ -19,6 +19,6 @@ int lower_build(Machine *m, TargetPart part, FILE *out);
    declaration order. Each line is the selector (4 bytes, or the 32 bytes of
    topic 0 for an event), the signature and the kind. Returns 0, or 1 or 2
    as lower_build. */
-int lower_abi(Machine *m, FILE *out);
+int lower_abi(Machine *m, FILE *out, int json);
 
 #endif

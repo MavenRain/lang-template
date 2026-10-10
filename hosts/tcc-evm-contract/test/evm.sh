@@ -113,6 +113,13 @@ for _p in examples/contract.lang examples/map.lang examples/residuals.lang examp
   build/langc abi "$_p" 2>&1
   echo "exit $?"
 done >"$tmp/abi.got"
+# The JSON ABI (Q-K4-3) of the two programs with events. `cast interface`
+# reads each array (K4c s8). The gate does not run cast.
+for _p in examples/contract.lang examples/events.lang; do
+  echo "# $_p --json"
+  build/langc abi "$_p" --json 2>&1
+  echo "exit $?"
+done >>"$tmp/abi.got"
 if ! cmp -s test/abi.expect "$tmp/abi.got"; then
   echo "FAIL evm abi: the langc abi lines differ from test/abi.expect"
   diff test/abi.expect "$tmp/abi.got" | head -n 6
