@@ -36,7 +36,7 @@ word() {
 # from the `langc abi` line of NAME (C-K4-16): Nat uint64, Flag bool, U256
 # uint256 and Addr address. Env and State are not arguments of the call.
 types() {
-  build/langc abi "$1" >"$tmp/types" || return 1
+  build/langc abi "$1" --text >"$tmp/types" || return 1
   awk -v n="$2" '$3 != "event" && index($2, n "(") == 1 {
     s = substr($2, length(n) + 2)
     print substr(s, 1, length(s) - 1)

@@ -355,7 +355,7 @@ static const char *value_name(const Low *l, const Value *v) {
 }
 
 static int refuse(Low *l, const Value *v, const char *where) {
-  return diag_fail(l->m->diag, "REFUSE_LOWER", l->entry, "K4b does not lower %s %s", value_name(l, v), where);
+  return diag_fail(l->m->diag, "REFUSE_LOWER", l->entry, "K4c does not lower %s %s", value_name(l, v), where);
 }
 
 static const struct {
@@ -528,15 +528,21 @@ static int lower_map_writes(Low *l, Stmts *b, Stmts *stores, const Value *v, uin
   return value != NULL && push_store(l, stores, ir_binary(l, IR_OP_KECCAK, key, ir_const(l, field)), value);
 }
 
-/* A chain of cons over the old List FIELD: the inner cons comes first. Word k
-   of the chain (k from 0 at the inner cons) goes to BASE + N + k, with BASE =
-   keccak256(slot) and N the old length (C-c9-1). *COUNT is the next k. */
+/* 1 when V is a chain of cons that ends at the old List FIELD. */
+static int is_list_chain(const Value *v, uint32_t field) {
+  uint32_t f;
+  if (field_of(v, 1u, &f) && f == field) return 1;
+  return is_op(v, OP_CONS) && v->argc == 2 && is_list_chain(v->args[1], field);
+}
+
+/* A chain of cons over the old List FIELD (is_list_chain): the inner cons
+   comes first. Word k of the chain (k from 0 at the inner cons) goes to
+   BASE + N + k, with BASE = keccak256(slot) and N the old length (C-c9-1).
+   *COUNT is the next k. */
 static int lower_list_writes(Low *l, Stmts *b, Stmts *stores, const Value *v, uint32_t field, const IrExpr *base,
                              const IrExpr *n, uint64_t *count) {
   uint32_t f;
   if (field_of(v, 1u, &f) && f == field) return 1;
-  if (!is_op(v, OP_CONS) || v->argc != 2)
-    return refuse(l, v, "as a List field value (want cons over the old field, or nil)");
   if (!lower_list_writes(l, b, stores, v->args[1], field, base, n, count)) return 0;
   const IrExpr *value = ir_set(l, b, lower_expr(l, b, v->args[0]));
   const IrExpr *at = ir_binary(l, IR_OP_ADD64, n, ir_const(l, (*count)++));
@@ -545,10 +551,13 @@ static int lower_list_writes(Low *l, Stmts *b, Stmts *stores, const Value *v, ui
 
 /* A new value of the List FIELD. nil stores the length 0 and keeps the old
    words, which no read reaches (C-c10-1). A cons chain stores its words, then
-   the length N + count. */
+   the length N + count. The refusal of each other value names the whole
+   value, not the tail of the chain (O-c11-1). */
 static int lower_list_write(Low *l, Stmts *b, Stmts *stores, const Value *v, uint32_t field) {
   uint64_t count = 0;
   if (val_is(v, OP_NIL)) return push_store(l, stores, ir_const(l, field), ir_const(l, 0));
+  if (!is_list_chain(v, field))
+    return refuse(l, v, "as a List field value (want cons over the old field, or nil)");
   const IrExpr *base = list_base(l, field);
   const IrExpr *n = base != NULL ? ir_set(l, b, ir_sload(l, ir_const(l, field))) : NULL;
   if (n == NULL || !lower_list_writes(l, b, stores, v, field, base, n, &count)) return 0;

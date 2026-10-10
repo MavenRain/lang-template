@@ -50,7 +50,7 @@ static int usage(FILE *err) {
         "       langc eval PROG NAME [ARGS...]\n"
         "       langc run PROG SCRIPT\n"
         "       langc ir PROG\n"
-        "       langc abi PROG [--json]\n"
+        "       langc abi PROG [--text]\n"
         "       langc build PROG [-o OUT] [--runtime]\n", err);
   return 2;
 }
@@ -88,8 +88,10 @@ static int parse_options(int argc, char **argv, Options *opt, Diag *diag) {
     case CMD_IR:
       return argc == 3 ? 1 : diag_fail(diag, "USAGE", NULL, "too many arguments");
     case CMD_ABI:
-      opt->json = argc == 4 && strcmp(argv[3], "--json") == 0;
-      return argc == 3 || opt->json ? 1 : diag_fail(diag, "USAGE", NULL, "abi takes only --json after the program");
+      /* The JSON ABI is the default; --text gives the C-K4-16 lines (C-c7-1). */
+      opt->json = argc == 3;
+      return argc == 3 || (argc == 4 && strcmp(argv[3], "--text") == 0) ? 1
+        : diag_fail(diag, "USAGE", NULL, "abi takes only --text after the program");
     case CMD_EVAL:
       if (argc < 4) return diag_fail(diag, "USAGE", NULL, "eval needs a definition name");
       opt->entry = argv[3];
