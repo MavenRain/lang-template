@@ -41,6 +41,42 @@ static int selector_collision(void) {
   return ok;
 }
 
+static int long_event(void) {
+  char name[131];
+  IrScalar types[16];
+  const IrExpr word = {.kind = IR_EXPR_CONST, .value = 7};
+  const IrExpr *fields[16];
+  memset(name, 'X', sizeof name - 1u);
+  memcpy(name, "LongEvent", 9);
+  name[sizeof name - 1u] = '\0';
+  for (size_t i = 0; i < 16; i++) {
+    types[i] = IR_SCALAR_U256;
+    fields[i] = &word;
+  }
+  const IrStmt log = {.kind = IR_STMT_LOG, .name = name, .types = types,
+                      .fields = fields, .field_count = 16};
+  const IrStmt stop = {.kind = IR_STMT_STOP};
+  const IrStmt *items[] = {&log, &stop};
+  const IrFunc func = {.name = "fire", .body = {items, 2}};
+  const IrProgram program = {&func, 1};
+  /* Geth SHA3 of the 259-byte signature: the 130-byte name and 16 uint256 fields. */
+  static const char topic[] = "7fb0a29f25fa17882045416d0db30634690efac21a991273249de567262a1747ff";
+  const TargetPart parts[] = {TARGET_PART_MAIN, TARGET_PART_RUNTIME};
+  int ok = 1;
+  for (size_t i = 0; i < sizeof parts / sizeof parts[0]; i++) {
+    char hex[4096] = {0};
+    FILE *out = tmpfile();
+    if (out == NULL) return 0;
+    EvmBuild result = evm_build(&program, NULL, 0, parts[i], out);
+    rewind(out);
+    size_t len = fread(hex, 1, sizeof hex - 1u, out);
+    ok = result == EVM_BUILD_OK && len > 0 && !ferror(out) && strstr(hex, topic) != NULL && ok;
+    fclose(out);
+  }
+  if (!ok) fputs("FAIL long event: valid event signatures must fit and hash in full\n", stderr);
+  return ok;
+}
+
 static int runtime_size(void) {
   /* A program with no entry: the dispatcher head, the REVERT block and the Trap() block. */
   static const char want[] = "346100125760043610610012575f3560e01c5b5f5ffd5b63ae96083a60e01b5f5260045ffd\n";
@@ -132,6 +168,7 @@ int main(void) {
   int ok = runtime_size();
   ok &= runtime_limit();
   ok &= selector_collision();
+  ok &= long_event();
   ok &= closed_pipe();
   if (ok) puts("build output regressions: passed");
   return ok ? 0 : 1;

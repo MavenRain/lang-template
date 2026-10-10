@@ -22,7 +22,7 @@ The TinyCC host kit of retainer-lang. It compiles the contract language to EVM b
 | K4a1 | Named events (front end) | Done |
 | K4a | Build output and storage layout | Done |
 | K4b | Entries, dispatch and call data decode | Done |
-| K4c | EVM views; EVM logs are planned | In progress |
+| K4c | EVM views and logs | In progress |
 | K4d to K5 | See the retainer-lang brief | Planned |
 
 
@@ -174,7 +174,7 @@ The exit codes of `langc run`:
 
 ## Events (slice K4a1)
 
-An event is a named effect with fields. K4a1 adds it to the front end only (`langc check`, `langc eval` and `langc run`). There is no EVM code for an event yet.
+An event is a named effect with fields. K4a1 adds it to the front end (`langc check`, `langc eval` and `langc run`). Slice K4c writes a LOG for it (C-K4-13, see `## EVM output`).
 
 ```
 event Opened
@@ -185,7 +185,7 @@ event Paid (to : Addr) (amount : U256)
 - An event is a constructor of `Out`. `Paid a w` is a value of type `Out`, thus an entry can put it in its `List Out` result. An incorrect number of arguments gives TYPE_ARITY. An argument of an incorrect type gives TYPE_MISMATCH.
 - Field types: Nat, Flag, U256 and Addr (the ABI word types). Another field type gives REFUSE_EVENT. More than 16 fields give REFUSE_EVENT. Two fields of one event with the same name give REFUSE_EVENT.
 - Names: an event name is a core name. A second event with the same name, or a definition with the name of an event, gives REFUSE_NAME (rule R4, `X is an event`). A field name is local to its event. It is not a projection and not a core name, thus two events and a definition can use the same field name.
-- Signature: `Name(t1,...,tn)`, with the ABI type name of each field. Nat, Flag and U256 are `uint256` (one word, as `target_abi_line` in `src/evm.c`). Addr is `address`. K4a1 does not compute the signature. Slice K4c computes it: the LOG topic0 is the keccak256 of the signature. All fields go in the log data and no field is indexed (LOG1). This default is not ruled.
+- Signature: `Name(t1,...,tn)`, with the ABI type name of each field, as for an entry (C-K4c-4): Nat is `uint64`, Flag is `bool`, U256 is `uint256` and Addr is `address`. Slice K4c computes it (C-K4-13): topic 0 of the LOG is the keccak256 of the signature. All fields go in the log data, one 32-byte word each, and no field is indexed (LOG1).
 - Scope: the checker adds the events to `Out` when it checks the `Out` family of the prelude, before all program definitions. Thus a definition can use an event that the program declares after it. A field type cannot use an alias definition of the program, because that definition is not in scope yet. An `event` in `domain/domain.lang` also adds a constructor to `Out`.
 - An event is not a state field: a state field of type `Out` gives REFUSE_STATE. `Out` has no ABI type, thus a definition with an `Out` argument or an `Out` result is a helper, not an entry or a view.
 - Print form: `langc eval` prints an event in the constructor form, for example `Paid 0x00000000000000000000000000000000000000bb 7u`. `langc run` prints each event of a call on a line `  event Name a1 ... an` after the call line. A compound argument is in parentheses.
@@ -237,7 +237,7 @@ Entry body (slice K4b):
 - `none` reverts with empty data.
 - A trap reverts with the 4 bytes of the `Trap()` selector, `0xae96083a`.
 - `some (pair STATE OUT)` writes each changed word field and each Map write with SSTORE. Then the block stops (STOP).
-- The runtime drops the OUT part and writes no LOG. Slice K4c adds the logs.
+- Before the stores, the block writes one LOG1 for each event of the OUT part, in the order of the list (C-K4-13). Topic 0 is the keccak256 of the event signature (see `## Events`). The data is the field words, 32 bytes each, in the order of the fields. An event with no fields has empty data. An event in a `flagIf` branch is logged only when the branch runs. A revert or a trap removes the logs.
 - `src/lower.c` lowers the first-order word part of the body: Nat, Flag, U256 and Addr values, Option, Prod and `if`. Each op gives the result of the evaluator: Nat add and mul use the K2 u64 rules; U256 add and mul trap on overflow, sub stops at 0, and div rounds down and traps on 0.
 
 View body (slice K4c):
@@ -266,7 +266,7 @@ The other refusals of `langc build` (exit 1, no output):
 
 `test/dispatch.sh` builds `examples/residuals.lang` and does 20 calls with geth `evm run`: empty call data, a short selector, an unknown selector, a call value (and a control call with no value), `none`, a trap, a caller that is not the owner, short call data, dirty Nat bits, Nat 2^64 - 1, dirty Addr bits (bit 160), a dirty Flag word (the value 2), a control call with an Addr and a Flag argument, and the storage after three entries. The selectors and the Map slots come from the SHA3 op of `evm`, not from `langc`.
 
-`test/evm.sh` is the chain test (the helpers are in `test/evmchain.sh`). It deploys `examples/contract.lang`, `examples/map.lang` and `examples/residuals.lang` with `evm run --create`. Then it does one `evm run --prestate --dump` step for each call of `test/run/basic.script`, `test/run/map.script` and `test/run/residuals.script` (21 steps). The block TIMESTAMP of a step is `NOW` (the prestate timestamp) and the sender is `CALLER`. After each step, the storage must equal the state that `langc run` prints for the calls up to that step. The result must agree with the result of the call: ok, revert (`none`) or trap. A view call must return the 32-byte word of the value that `langc run` prints for the view. The selectors come from the SHA3 op of `evm`. The argument types come from the `def` line of the entry.
+`test/evm.sh` is the chain test (the helpers are in `test/evmchain.sh`). It deploys `examples/contract.lang`, `examples/map.lang`, `examples/residuals.lang` and `examples/events.lang` with `evm run --create`. Then it does one `evm run --prestate --dump` step for each call of `test/run/basic.script`, `test/run/map.script`, `test/run/residuals.script` and `test/run/events.script` (23 steps). The block TIMESTAMP of a step is `NOW` (the prestate timestamp) and the sender is `CALLER`. After each step, the storage must equal the state that `langc run` prints for the calls up to that step. The result must agree with the result of the call: ok, revert (`none`) or trap. A view call must return the 32-byte word of the value that `langc run` prints for the view. The logs of each step (`evm run --debug`) must equal the events that `langc run` prints for the call: one LOG1 for each event, in order, with topic 0 and the data words. The selectors come from the SHA3 op of `evm`. The argument types come from the `def` line of the entry.
 
 `build/buildtool` checks the 37-byte runtime of a contract with no entry, the EIP-170 runtime limit in the two output modes, the EVM_SELECTOR refusal (before any output) and IO_WRITE with exit 2 for a closed stdout pipe.
 

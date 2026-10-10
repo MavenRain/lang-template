@@ -5,8 +5,10 @@
 # the state that `langc run` prints for the calls up to that step, and the
 # result must agree with the result of the call: ok, revert (`none`) or trap
 # (the Trap() selector). A view call must return the 32-byte word of the view
-# value (slice K4c, C-K4-10). The TIMESTAMP of the block is NOW (the prestate timestamp) and
-# the sender is CALLER. It needs evm (go-ethereum), bc, od and build/slottool.
+# value (slice K4c, C-K4-10). The logs of the step (`evm run --debug`) must
+# equal the events that `langc run` prints for the call: one LOG1 for each
+# event, in order (slice K4c, C-K4-13). The TIMESTAMP of the block is NOW (the
+# prestate timestamp) and the sender is CALLER. It needs evm (go-ethereum), bc, od and build/slottool.
 # Run it from the kit root.
 set -u
 fail=0
@@ -14,6 +16,35 @@ steps=0
 tmp=${TMPDIR:-/tmp}/langc-evm.$$
 mkdir -p "$tmp"
 . test/evmchain.sh
+
+# wantlogs PROG K: one line for each event that `langc run` prints for call K
+# (tmp/run): topic 0 (the keccak256 of the signature) and the data words.
+wantlogs() {
+  : >"$tmp/wantlogs"
+  awk -v k="$2" '/^[^ ]/ { p = ($1 == k); next } p && $1 == "event"' "$tmp/run" >"$tmp/events"
+  while read -r _ev _evname _evargs; do
+    awk -v n="$_evname" '$1 == "event" && $2 == n { $1 = ""; $2 = ""; print "def " n " :" $0 }' "$1" >"$tmp/event"
+    _topic=$(keccak "$(printf '%s(%s)' "$_evname" "$(types "$tmp/event" "$_evname")" | od -An -v -tx1 | tr -d ' \n')" </dev/null)
+    _data=
+    for _a in $_evargs; do _data=$_data$(pad "$(word "$_a")"); done
+    echo "$_topic ${_data:--}" >>"$tmp/wantlogs"
+  done <"$tmp/events"
+}
+
+# logs CALLER INPUT: the logs of the step on tmp/pre.json (the LOGS block of
+# `evm run --debug`), one line for each LOG: the topics and the data.
+logs() {
+  evm run --debug --prestate "$tmp/pre.json" --receiver "0x$receiver" --sender "$1" --input "$2" \
+    >"$tmp/debug" 2>&1 </dev/null || return 1
+  awk '
+    /^#### LOGS ####/ { p = 1; next }
+    /^####/ { p = 0 }
+    !p { next }
+    /^LOG[0-4]:/ { if (n) print t " " (d == "" ? "-" : d); n = 1; t = ""; d = ""; next }
+    length($2) == 64 { t = t (t == "" ? "" : ",") $2; next }
+    { for (i = 2; i <= NF && $i ~ /^[0-9a-f][0-9a-f]$/; i++) d = d $i }
+    END { if (n) print t " " (d == "" ? "-" : d) }' "$tmp/debug" >"$tmp/gotlogs"
+}
 
 # chain PROG SCRIPT: deploy PROG, then one step for each call of SCRIPT.
 chain() {
@@ -47,7 +78,8 @@ chain() {
       *) _want=unknown ;;
     esac
     want "$(awk '$1 == "state" { sub(/^state /, ""); print }' "$tmp/run")"
-    if ! step "$_now" "$_caller" "$(input "$_prog" "$_name" "$@")"; then
+    _input=$(input "$_prog" "$_name" "$@")
+    if ! step "$_now" "$_caller" "$_input"; then
       echo "FAIL evm $_script:$_k $_name: evm: $(head -n 1 "$tmp/dump")"
       fail=$((fail + 1))
       return
@@ -61,12 +93,19 @@ chain() {
       diff "$tmp/want" "$tmp/got" | head -n 6
       fail=$((fail + 1))
     fi
+    wantlogs "$_prog" "$_k"
+    if ! logs "$_caller" "$_input" || ! cmp -s "$tmp/wantlogs" "$tmp/gotlogs"; then
+      echo "FAIL evm $_script:$_k $_name: logs"
+      diff "$tmp/wantlogs" "$tmp/gotlogs" | head -n 6
+      fail=$((fail + 1))
+    fi
   done
 }
 
 chain examples/contract.lang test/run/basic.script
 chain examples/map.lang test/run/map.script
 chain examples/residuals.lang test/run/residuals.script
+chain examples/events.lang test/run/events.script
 
 rm -rf "$tmp"
 echo "evm steps: $steps checked"

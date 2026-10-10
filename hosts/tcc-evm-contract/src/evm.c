@@ -2,6 +2,7 @@
    Slice K1 keeps the target interface and the ABI selectors. */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "asm.h"
 #include "evm.h"
@@ -23,16 +24,35 @@ static const char *abi_type(IrScalar s) {
   return "uint256";
 }
 
-/* NAME(TYPE,...) with the ABI type of each parameter: Nat = uint64,
-   Flag = bool, U256 = uint256, Addr = address. Returns the length, or 0
-   when it does not fit. */
-static size_t signature(char *text, const IrFunc *fn) {
-  int used = snprintf(text, EVM_SIGNATURE, "%s(", fn->name);
-  for (size_t i = 0; used > 0 && used < EVM_SIGNATURE && i < fn->param_count; i++) {
-    used += snprintf(text + used, EVM_SIGNATURE - (size_t)used, "%s%s", i == 0 ? "" : ",", abi_type(fn->params[i]));
+/* NAME(TYPE,...) with the ABI type of each of the COUNT TYPES: Nat =
+   uint64, Flag = bool, U256 = uint256, Addr = address (an entry, a view or
+   an event, C-K4c-4). Returns the length, or 0 when it does not fit. */
+static size_t signature_of(char *text, size_t capacity, const char *name, const IrScalar *types, size_t count) {
+  int used = snprintf(text, capacity, "%s(", name);
+  for (size_t i = 0; used > 0 && (size_t)used < capacity && i < count; i++) {
+    used += snprintf(text + used, capacity - (size_t)used, "%s%s", i == 0 ? "" : ",", abi_type(types[i]));
   }
-  if (used > 0 && used < EVM_SIGNATURE) used += snprintf(text + used, EVM_SIGNATURE - (size_t)used, ")");
-  return used > 0 && used < EVM_SIGNATURE ? (size_t)used : 0;
+  if (used > 0 && (size_t)used < capacity) used += snprintf(text + used, capacity - (size_t)used, ")");
+  return used > 0 && (size_t)used < capacity ? (size_t)used : 0;
+}
+
+static size_t signature(char *text, const IrFunc *fn) {
+  return signature_of(text, EVM_SIGNATURE, fn->name, fn->params, fn->param_count);
+}
+
+/* Event names are not limited by the entry selector's signature buffer. */
+static EvmBuild event_topic(const IrStmt *s, unsigned char topic[32]) {
+  size_t name_size = strlen(s->name);
+  /* Each ABI type is at most seven bytes, plus its comma. */
+  if (name_size > SIZE_MAX - 3u || s->field_count > (SIZE_MAX - name_size - 3u) / 8u)
+    return EVM_BUILD_SIZE;
+  size_t capacity = name_size + 3u + 8u * s->field_count;
+  char *text = malloc(capacity);
+  if (text == NULL) return EVM_BUILD_OOM;
+  size_t size = signature_of(text, capacity, s->name, s->types, s->field_count);
+  if (size > 0) keccak256((const unsigned char *)text, size, topic);
+  free(text);
+  return size > 0 ? EVM_BUILD_OK : EVM_BUILD_IR;
 }
 
 int target_abi_line(const IrFunc *fn, FILE *out, FILE *err) {
@@ -82,12 +102,14 @@ int target_write(const IrProgram *prog, TargetPart part, FILE *out, FILE *err) {
 
 /* IR to EVM (C-K4b-1, C-K4b-7). Local k is the memory word at 32 * k. The
    two words after the locals of an entry are a scratch for KECCAK and
-   MUL_TRAP: they use it only after both operands are on the stack. */
+   MUL_TRAP: they use it only after both operands are on the stack. The
+   words after the scratch are the data of a LOG (C-K4-13). */
 typedef struct {
   Asm *a;
   uint64_t scratch;
   Label revert;
   Label trap;
+  EvmBuild failure;
 } Emit;
 
 static void emit_ops(Asm *a, const Op *ops, size_t count) {
@@ -232,6 +254,20 @@ static int emit_stmt(Emit *e, const IrStmt *s) {
     asm_push(a, 32);
     emit_ops(a, (const Op[]){EVM_OP_PUSH0, EVM_OP_RETURN}, 2);
     return 1;
+  case IR_STMT_LOG: { /* an event (C-K4-13): the field words after the scratch, then LOG1 */
+    unsigned char topic[32];
+    EvmBuild result = event_topic(s, topic);
+    if (result != EVM_BUILD_OK) { e->failure = result; return 0; }
+    for (size_t i = 0; i < s->field_count; i++) {
+      if (!emit_expr(e, s->fields[i])) return 0;
+      emit_store(a, e->scratch + 64u + 32u * (uint64_t)i);
+    }
+    asm_push_word(a, topic);
+    asm_push(a, 32u * (uint64_t)s->field_count);
+    asm_push(a, e->scratch + 64u);
+    asm_op(a, EVM_OP_LOG1);
+    return 1;
+  }
   case IR_STMT_ALLOC:
   case IR_STMT_SWITCH:
   case IR_STMT_REPEAT:
@@ -289,7 +325,7 @@ static EvmBuild evm_runtime(Asm *a, const IrProgram *prog, Label first) {
     for (size_t j = 0; j < i; j++)
       if (hits[j] == hits[i]) return EVM_BUILD_SELECTOR;
   }
-  Emit e = {a, 0, asm_label(a), asm_label(a)};
+  Emit e = {a, 0, asm_label(a), asm_label(a), EVM_BUILD_IR};
   asm_op(a, EVM_OP_CALLVALUE);
   asm_jump_if(a, e.revert);
   asm_push(a, 4);
@@ -315,7 +351,7 @@ static EvmBuild evm_runtime(Asm *a, const IrProgram *prog, Label first) {
   emit_ops(a, (const Op[]){EVM_OP_PUSH0, EVM_OP_REVERT}, 2);
   int ok = 1;
   for (size_t i = 0; ok && i < prog->func_count; i++) ok = evm_entry(&e, &prog->funcs[i], first + (Label)i);
-  return ok ? EVM_BUILD_OK : EVM_BUILD_IR;
+  return ok ? EVM_BUILD_OK : e.failure;
 }
 
 static int is_zero(const unsigned char *w) {

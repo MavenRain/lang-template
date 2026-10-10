@@ -9,7 +9,7 @@
 
 #include "target.h"
 
-/* EVM_BUILD_OOM: calloc or the fopen of the /dev/null sink failed.
+/* EVM_BUILD_OOM: malloc, calloc or the fopen of the /dev/null sink failed.
    EVM_BUILD_IR: an entry or view has an IR form that the EVM back end does
    not lower (a heap block, a loop or a switch).
    EVM_BUILD_SIGNATURE: the signature of an entry or view is longer than

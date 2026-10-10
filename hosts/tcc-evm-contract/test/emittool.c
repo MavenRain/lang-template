@@ -38,7 +38,7 @@ static int expression(const char *name, const IrExpr *expr, const unsigned char 
                       const unsigned char *slot, int write) {
   Asm *a = calloc(1, sizeof *a);
   if (a == NULL) return 0;
-  Emit e = {a, 32, asm_label(a), asm_label(a)};
+  Emit e = {a, 32, asm_label(a), asm_label(a), EVM_BUILD_IR};
   if (slot != NULL && !write) {
     asm_push(a, 99);
     asm_push_word(a, slot);

@@ -96,7 +96,9 @@ typedef enum {
   IR_STMT_RETURN, /* return expr */
   IR_STMT_SSTORE, /* storage word at slot expr := value (EVM SSTORE) */
   IR_STMT_REVERT, /* stop the call, undo the stores: EVM REVERT with empty data */
-  IR_STMT_STOP    /* stop the call, keep the stores: EVM STOP */
+  IR_STMT_STOP,   /* stop the call, keep the stores: EVM STOP */
+  IR_STMT_LOG     /* EVM LOG1 (C-K4-13): topic 0 = keccak256 of name(types),
+                     data = the field_count words of fields */
 } IrStmtKind;
 
 struct IrStmt {
@@ -111,6 +113,8 @@ struct IrStmt {
   IrBlock otherwise;
   const IrBlock *arms;
   size_t arm_count;
+  const char *name;      /* IR_STMT_LOG: the event name */
+  const IrScalar *types; /* IR_STMT_LOG: the type of each field */
 };
 
 /* One exported entry. The body block ends in RETURN, TRAP, REVERT or STOP on

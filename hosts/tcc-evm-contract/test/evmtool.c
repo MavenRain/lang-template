@@ -52,7 +52,7 @@ static int hash_case(const char *name, const IrExpr *expr, const TestWord left,
                      const TestWord right, const TestWord local) {
   Asm a;
   asm_init(&a);
-  Emit e = {&a, 32, asm_label(&a), asm_label(&a)};
+  Emit e = {&a, 32, asm_label(&a), asm_label(&a), EVM_BUILD_IR};
   unsigned char memory[128] = {0}, preimage[64];
   TestWord actual, expected;
   memcpy(memory, local, 32);

@@ -480,13 +480,38 @@ static int is_emit(const Low *l, const Value *v) {
          && strcmp(l->m->families[c->family].name, "Out") == 0 && strcmp(c->name, "emit") == 0;
 }
 
-/* Force the words of ignored outputs before any state store. Keep flagIf
-   branches lazy, including at List positions and within event fields. */
+static IrScalar scalar_of(const Value *t);
+
+/* An event in the OUT list (C-K4-13): force each field word, then one LOG
+   with the signature of the event and the field words. */
+static int lower_log(Low *l, Stmts *b, const CtorInfo *c, const Value *v) {
+  const IrExpr **fields = low_alloc(l, (v->argc + 1u) * sizeof *fields);
+  IrScalar *types = fields != NULL ? low_alloc(l, (v->argc + 1u) * sizeof *types) : NULL;
+  if (types == NULL) return 0;
+  for (uint32_t i = 0; i < v->argc; i++) {
+    fields[i] = ir_set(l, b, lower_expr(l, b, v->args[i]));
+    if (fields[i] == NULL) return 0;
+    types[i] = scalar_of(field_type(l->m, c, i));
+  }
+  IrStmt *s = new_stmt(l, IR_STMT_LOG);
+  if (s == NULL) return 0;
+  s->name = c->name;
+  s->types = types;
+  s->fields = fields;
+  s->field_count = v->argc;
+  return push(l, b, s);
+}
+
+/* Force the words of the outputs before any state store, and write one LOG
+   for each event, in the order of the list (C-K4-13). Keep flagIf branches
+   lazy, including at List positions and within event fields. */
 static int lower_out_words(Low *l, Stmts *b, const Value *v) {
   uint32_t field;
+  const CtorInfo *c = is_op(v, OP_CTOR) && v->inst < l->m->ctor_count ? &l->m->ctors[v->inst] : NULL;
   if (val_is(v, OP_NIL)) return 1;
   if (is_emit(l, v))
     return diag_fail(l->m->diag, "REFUSE_LOWER", l->entry, "emit has no EVM form; use a named event");
+  if (c != NULL && c->event) return lower_log(l, b, c, v);
   if (is_op(v, OP_FLAG_IF) && v->argc == 3) {
     const IrExpr *cond = lower_expr(l, b, v->args[0]);
     Stmts yes = {NULL, 0, 0};
