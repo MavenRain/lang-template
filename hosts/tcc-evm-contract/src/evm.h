@@ -33,4 +33,15 @@ typedef enum {
 EvmBuild evm_build(const IrProgram *prog, const unsigned char (*pairs)[64], size_t count, TargetPart part,
                    FILE *out);
 
+/* Checks every entry and view signature and refuses duplicate selectors,
+   using the same validation as the bytecode dispatcher. */
+EvmBuild evm_abi_check(const IrProgram *prog);
+
+/* Writes one `langc abi` line on OUT (C-K4-16): `0xSELECTOR NAME(TYPES)
+   KIND`. KIND is "entry", "view" or "event". The selector is the first 4
+   bytes of the keccak256 of the signature, or all 32 bytes (topic 0) for an
+   event. EVM_BUILD_SIGNATURE: the signature of an entry or view is longer
+   than 255 bytes. */
+EvmBuild evm_abi_line(const char *kind, const char *name, const IrScalar *types, size_t count, FILE *out);
+
 #endif

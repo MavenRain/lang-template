@@ -18,13 +18,14 @@ mkdir -p "$tmp"
 . test/evmchain.sh
 
 # wantlogs PROG K: one line for each event that `langc run` prints for call K
-# (tmp/run): topic 0 (the keccak256 of the signature) and the data words.
+# (tmp/run): topic 0 (from the `langc abi` event line, C-K4-16) and the data
+# words. test/abi.expect holds the cast check of the topics.
 wantlogs() {
   : >"$tmp/wantlogs"
+  build/langc abi "$1" >"$tmp/abi" || : >"$tmp/abi"
   awk -v k="$2" '/^[^ ]/ { p = ($1 == k); next } p && $1 == "event"' "$tmp/run" >"$tmp/events"
   while read -r _ev _evname _evargs; do
-    awk -v n="$_evname" '$1 == "event" && $2 == n { $1 = ""; $2 = ""; print "def " n " :" $0 }' "$1" >"$tmp/event"
-    _topic=$(keccak "$(printf '%s(%s)' "$_evname" "$(types "$tmp/event" "$_evname")" | od -An -v -tx1 | tr -d ' \n')" </dev/null)
+    _topic=$(awk -v n="$_evname" '$3 == "event" && index($2, n "(") == 1 { print substr($1, 3) }' "$tmp/abi")
     _data=
     for _a in $_evargs; do _data=$_data$(pad "$(word "$_a")"); done
     echo "$_topic ${_data:--}" >>"$tmp/wantlogs"
@@ -101,6 +102,22 @@ chain() {
     fi
   done
 }
+
+# The `langc abi` lines (C-K4-16) of each chain program and of one refused
+# program equal test/abi.expect. Each selector and topic there equals the
+# output of `cast sig` or `cast sig-event` (foundry cast 0.3.0, K4c s6). The
+# gate does not run cast.
+for _p in examples/contract.lang examples/map.lang examples/residuals.lang examples/events.lang \
+  test/lower/emit.lang; do
+  echo "# $_p"
+  build/langc abi "$_p" 2>&1
+  echo "exit $?"
+done >"$tmp/abi.got"
+if ! cmp -s test/abi.expect "$tmp/abi.got"; then
+  echo "FAIL evm abi: the langc abi lines differ from test/abi.expect"
+  diff test/abi.expect "$tmp/abi.got" | head -n 6
+  fail=$((fail + 1))
+fi
 
 chain examples/contract.lang test/run/basic.script
 chain examples/map.lang test/run/map.script

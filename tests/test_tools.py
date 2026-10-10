@@ -151,9 +151,10 @@ class GeneratorTests(unittest.TestCase):
                          'static const char LANG_NAME[] = "example-lang";\n')
         self.assertIn(": make check\n", result.stdout)
 
-    def test_tcc_wasm_tcc_evm_tcc_evm_dao_and_tcc_evm_anchor_hosts(self):
+    def test_tcc_wasm_tcc_evm_tcc_evm_dao_tcc_evm_anchor_and_tcc_js_hosts(self):
         for host, target in (("tcc-wasm", "src/wasm.c"), ("tcc-evm", "src/evm.c"),
-                             ("tcc-evm-dao", "src/evm.c"), ("tcc-evm-anchor", "src/evm.c")):
+                             ("tcc-evm-dao", "src/evm.c"), ("tcc-evm-anchor", "src/evm.c"),
+                             ("tcc-js", "src/json.c")):
             with self.subTest(host=host):
                 kit = self.template / "hosts" / host
                 (kit / "src").mkdir(parents=True)
@@ -199,11 +200,14 @@ class GeneratorTests(unittest.TestCase):
         self.assertFalse(self.dest.exists())
 
     def test_tcc_json_document_key_is_reserved(self):
-        result = run("bash", str(self.template / "bin/new-lang.sh"),
-                     "instances", "tcc-json", str(self.dest))
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("reserved by the tcc-json document format", result.stderr)
-        self.assertFalse(self.dest.exists())
+        # tcc-js writes the same JSON document with --json.
+        for host in ("tcc-json", "tcc-js"):
+            with self.subTest(host=host):
+                result = run("bash", str(self.template / "bin/new-lang.sh"),
+                             "instances", host, str(self.dest))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("reserved by the tcc-json document format", result.stderr)
+                self.assertFalse(self.dest.exists())
 
 
 class HostListTests(unittest.TestCase):

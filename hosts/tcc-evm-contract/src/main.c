@@ -184,8 +184,9 @@ static int run(const Options *opt, Arena *arena, Diag *diag) {
     }
     case CMD_BUILD:
       return build_command(&machine, opt, diag);
-    case CMD_IR:
     case CMD_ABI:
+      return lower_abi(&machine, stdout);
+    case CMD_IR:
       break;
   }
   diag_fail(diag, "PLANNED", NULL, "the %s command is not built yet (target %s)", command_word(opt->command), target_name);

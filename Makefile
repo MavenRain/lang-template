@@ -48,6 +48,11 @@ check: doc-check test
 	else \
 	  echo "check: skip hosts/tcc-evm-anchor (no Makefile)"; \
 	fi
+	@if [ -f hosts/tcc-js/Makefile ]; then \
+	  $(MAKE) -C hosts/tcc-js check; \
+	else \
+	  echo "check: skip hosts/tcc-js (no Makefile)"; \
+	fi
 	@if [ -d hosts/tcc-wasm ] && [ -d hosts/tcc-evm ]; then \
 	  for path in $(TCC_SHARED); do \
 	    diff -r hosts/tcc-wasm/$$path hosts/tcc-evm/$$path || exit 1; \

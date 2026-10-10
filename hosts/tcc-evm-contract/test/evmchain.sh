@@ -32,22 +32,15 @@ word() {
   esac
 }
 
-# types PROG NAME: the ABI types of the arguments of the entry NAME, from the
-# one-line `def NAME :` type in PROG: Nat uint64, Flag bool, U256 uint256 and
-# Addr address. Env and State are not arguments of the call.
+# types PROG NAME: the ABI types of the arguments of the entry or view NAME,
+# from the `langc abi` line of NAME (C-K4-16): Nat uint64, Flag bool, U256
+# uint256 and Addr address. Env and State are not arguments of the call.
 types() {
-  awk -v n="$2" '$1 == "def" && $2 == n && $3 == ":" {
-    s = $0; t = ""
-    while (match(s, /\([a-z][A-Za-z0-9_]* : [A-Za-z0-9]+\)/)) {
-      g = substr(s, RSTART + 1, RLENGTH - 2)
-      s = substr(s, RSTART + RLENGTH)
-      sub(/^[^:]*: /, "", g)
-      a = (g == "Nat") ? "uint64" : (g == "Flag") ? "bool" : (g == "U256") ? "uint256" : (g == "Addr") ? "address" : ""
-      if (a != "") t = t (t == "" ? "" : ",") a
-    }
-    print t
-    exit
-  }' "$1"
+  build/langc abi "$1" >"$tmp/types" || return 1
+  awk -v n="$2" '$3 != "event" && index($2, n "(") == 1 {
+    s = substr($2, length(n) + 2)
+    print substr(s, 1, length(s) - 1)
+  }' "$tmp/types"
 }
 
 # input PROG NAME ARGS...: the call data of the entry NAME of PROG with the

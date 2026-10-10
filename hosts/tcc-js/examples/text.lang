@@ -1,0 +1,17 @@
+-- Text: Str literals, strEq and showNat. Each proof is refl.
+def greeting : Str := "hi"
+def blank : Str := ""
+def quoted : Str := "hi \"x\" \\ \n ok"
+def accent : Str := "café"
+def snow : Str := "☃ 2°"
+def priceTag : Str := showNat 1200
+def sameText : Eq Flag (strEq "bolt" "bolt") flagYes := refl
+def otherText : Eq Flag (strEq "bolt" "nut") flagNo := refl
+def prefixText : Eq Flag (strEq "bolt" "bolts") flagNo := refl
+def zeroText : Eq Str (showNat 0) "0" := refl
+def priceText : Eq Str (showNat 1200) "1200" := refl
+def sumText : Eq Str (showNat (natAdd 1199 1)) "1200" := refl
+def mostText : Eq Str (showNat 18446744073709551615) "18446744073709551615" := refl
+def escapeText : Eq Str "say \"hi\"\n" "say \"hi\"\n" := refl
+def escapeOther : Eq Flag (strEq "a\nb" "a\\nb") flagNo := refl
+def accentOther : Eq Flag (strEq "café" "cafe") flagNo := refl

@@ -52,7 +52,7 @@ static int regression(const char *name, const char *defs, size_t functions,
   if (ok) {
     if (empty_fuel) machine.fuel = 0;
     const CtorInfo *ci = &machine.ctors[machine.families[machine.state_family].first_ctor];
-    ok = lower_entries(&machine, ci, &program);
+    ok = lower_entries(&machine, ci, &program, NULL);
   }
   ok = ok && diag.code == NULL && program.func_count == functions;
   if (ok && functions > 0) {
@@ -88,9 +88,65 @@ static int regression(const char *name, const char *defs, size_t functions,
 
 #define ENTRY "def entry : Env -> State -> Option (Prod State (List Out)) := fun env s => "
 #define TOKEN "0x00000000000000000000000000000000000000aa"
+#define ABI_STATE "state State := makeState (counter : Nat)\ndef init : State := makeState 0\n"
+#define ABI_ENTRY_TYPE " : Env -> State -> Option (Prod State (List Out)) := fun env s => some (pair s nil)\n"
+
+static int abi_regression(const char *name, const char *source, const char *code, long bytes) {
+  Arena arena;
+  Diag diag;
+  DeclList decls;
+  Machine machine;
+  FILE *out = tmpfile();
+  if (out == NULL) return 0;
+  arena_init(&arena, (size_t)1 << 25);
+  diag_init(&diag);
+  int ok = front_load(&arena, name, source, strlen(source), &decls, &diag)
+    && check_program(&arena, &decls, &machine, &diag);
+  if (ok) {
+    int result = lower_abi(&machine, out);
+    ok = (code == NULL ? result == 0 && diag.code == NULL
+                      : result == 1 && diag.code != NULL && strcmp(diag.code, code) == 0)
+      && ftell(out) == bytes;
+  }
+  if (!ok) {
+    fprintf(stderr, "FAIL abi %s (bytes %ld)\n", name, ftell(out));
+    if (diag.set) diag_print(&diag, stderr);
+  }
+  fclose(out);
+  arena_release(&arena);
+  return ok;
+}
+
+static int abi_boundaries(void) {
+  char name[255], source[1024];
+  memset(name, 'a', sizeof name);
+  name[253] = '\0';
+  snprintf(source, sizeof source, ABI_STATE "def %s" ABI_ENTRY_TYPE, name);
+  int ok = abi_regression("signature-255", source, NULL, 273);
+  name[253] = 'a'; name[254] = '\0';
+  snprintf(source, sizeof source, ABI_STATE "def good" ABI_ENTRY_TYPE "def %s" ABI_ENTRY_TYPE, name);
+  ok &= abi_regression("signature-256", source, "EVM_SIGNATURE", 0);
+  snprintf(source, sizeof source, ABI_STATE "event %s\n", name);
+  ok &= abi_regression("event-signature-256", source, NULL, 330);
+  return ok;
+}
 
 int main(void) {
   int ok = 1;
+  ok &= abi_regression("entry-collision", ABI_STATE
+    "def entry37557" ABI_ENTRY_TYPE "def entry9660" ABI_ENTRY_TYPE,
+    "EVM_SELECTOR", 0);
+  ok &= abi_regression("reverse-entry-collision", ABI_STATE
+    "def entry9660" ABI_ENTRY_TYPE "def entry37557" ABI_ENTRY_TYPE,
+    "EVM_SELECTOR", 0);
+  ok &= abi_regression("entry-view-collision", ABI_STATE
+    "def entry37557" ABI_ENTRY_TYPE "def entry9660 : Env -> State -> Nat := fun env s => 0\n",
+    "EVM_SELECTOR", 0);
+  ok &= abi_regression("init-trap",
+    "state State := makeState (counter : U256)\n"
+    "def init : State := makeState (u256Div 1u 0u)\n"
+    ENTRY "some (pair s nil)\n", "REFUSE_LOWER", 0);
+  ok &= abi_boundaries();
   ok &= regression("helper-pair",
     "def helper : Env -> State -> Option (Prod Nat Nat) := fun env s => some (pair 1 2)\n",
     0, 0, 0, 0, 0, 0);

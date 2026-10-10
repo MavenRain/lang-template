@@ -55,6 +55,26 @@ static EvmBuild event_topic(const IrStmt *s, unsigned char topic[32]) {
   return size > 0 ? EVM_BUILD_OK : EVM_BUILD_IR;
 }
 
+EvmBuild evm_abi_line(const char *kind, const char *name, const IrScalar *types, size_t count, FILE *out) {
+  int event = strcmp(kind, "event") == 0;
+  size_t name_size = strlen(name);
+  if (name_size > SIZE_MAX - 3u || count > (SIZE_MAX - name_size - 3u) / 8u) return EVM_BUILD_SIZE;
+  size_t capacity = name_size + 3u + 8u * count;
+  char *text = malloc(capacity);
+  if (text == NULL) return EVM_BUILD_OOM;
+  size_t size = signature_of(text, capacity, name, types, count);
+  int fits = size > 0 && (event || size < EVM_SIGNATURE);
+  unsigned char digest[32];
+  if (fits) {
+    keccak256((const unsigned char *)text, size, digest);
+    fputs("0x", out);
+    for (size_t i = 0; i < (event ? 32u : 4u); i++) fprintf(out, "%02x", digest[i]);
+    fprintf(out, " %s %s\n", text, kind);
+  }
+  free(text);
+  return size == 0 ? EVM_BUILD_IR : !fits ? EVM_BUILD_SIGNATURE : ferror(out) ? EVM_BUILD_WRITE : EVM_BUILD_OK;
+}
+
 int target_abi_line(const IrFunc *fn, FILE *out, FILE *err) {
   char text[EVM_SIGNATURE];
   size_t size = signature(text, fn);
@@ -78,6 +98,21 @@ static int selector(const IrFunc *fn, uint64_t *out) {
   keccak256((const unsigned char *)text, size, digest);
   *out = (uint64_t)digest[0] << 24 | (uint64_t)digest[1] << 16 | (uint64_t)digest[2] << 8 | digest[3];
   return 1;
+}
+
+static EvmBuild program_selectors(const IrProgram *prog, uint64_t *hits) {
+  if (prog->func_count > ASM_LABELS) return EVM_BUILD_SIZE;
+  for (size_t i = 0; i < prog->func_count; i++) {
+    if (!selector(&prog->funcs[i], &hits[i])) return EVM_BUILD_SIGNATURE;
+    for (size_t j = 0; j < i; j++)
+      if (hits[j] == hits[i]) return EVM_BUILD_SELECTOR;
+  }
+  return EVM_BUILD_OK;
+}
+
+EvmBuild evm_abi_check(const IrProgram *prog) {
+  uint64_t hits[ASM_LABELS];
+  return program_selectors(prog, hits);
 }
 
 /* The number of low bits that a clean argument word can use (C-K4-6).
@@ -319,12 +354,8 @@ static int evm_entry(Emit *e, const IrFunc *fn, Label label) {
    views come after it. */
 static EvmBuild evm_runtime(Asm *a, const IrProgram *prog, Label first) {
   uint64_t hits[ASM_LABELS];
-  if (prog->func_count > ASM_LABELS) return EVM_BUILD_SIZE;
-  for (size_t i = 0; i < prog->func_count; i++) {
-    if (!selector(&prog->funcs[i], &hits[i])) return EVM_BUILD_SIGNATURE;
-    for (size_t j = 0; j < i; j++)
-      if (hits[j] == hits[i]) return EVM_BUILD_SELECTOR;
-  }
+  EvmBuild status = program_selectors(prog, hits);
+  if (status != EVM_BUILD_OK) return status;
   Emit e = {a, 0, asm_label(a), asm_label(a), EVM_BUILD_IR};
   asm_op(a, EVM_OP_CALLVALUE);
   asm_jump_if(a, e.revert);

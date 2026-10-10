@@ -572,9 +572,10 @@ static IrScalar scalar_of(const Value *t) {
          : IR_SCALAR_NAT;
 }
 
-/* PROGRAM gets one IrFunc for each entry and each view (C-K4-10). Returns 1,
-   or 0 after a diagnostic. */
-static int lower_entries(Machine *m, const CtorInfo *ci, IrProgram *program) {
+/* PROGRAM gets one IrFunc for each entry and each view (C-K4-10). KINDS, when
+   it is not NULL, gets "entry" or "view" for each IrFunc. Returns 1, or 0
+   after a diagnostic. */
+static int lower_entries(Machine *m, const CtorInfo *ci, IrProgram *program, const char **kinds) {
   uint32_t env = family_named(m, "Env");
   uint32_t out = family_named(m, "Out");
   IrFunc *funcs = m->def_count > 0 ? arena_alloc(m->arena, m->def_count * sizeof *funcs) : NULL;
@@ -594,6 +595,7 @@ static int lower_entries(Machine *m, const CtorInfo *ci, IrProgram *program) {
     for (uint32_t k = 0; k < r.arg_count; k++) params[k] = scalar_of(r.arg_types[k]);
     IrScalar result = role == 2 ? scalar_of(r.result) : IR_SCALAR_NAT;
     IrFunc func = {m->defs[i].name, params, r.arg_count, result, l.locals, block_of(&b)};
+    if (kinds != NULL) kinds[n] = role == 2 ? "view" : "entry";
     funcs[n++] = func;
   }
   program->funcs = funcs;
@@ -601,7 +603,10 @@ static int lower_entries(Machine *m, const CtorInfo *ci, IrProgram *program) {
   return 1;
 }
 
-int lower_build(Machine *m, TargetPart part, FILE *out) {
+/* Checks that M has a state and def init : State, with word, List and Map
+   fields only. CI_OUT gets the state constructor and INIT_OUT the index of
+   init. Returns 0, or 1 after a diagnostic. */
+static int lower_state_ctor(Machine *m, const CtorInfo **ci_out, uint32_t *init_out) {
   uint32_t init = m->def_count;
   for (uint32_t i = 0; i < m->def_count; i++)
     if (strcmp(m->defs[i].name, "init") == 0) init = i;
@@ -623,16 +628,67 @@ int lower_build(Machine *m, TargetPart part, FILE *out) {
                        "K4a stores only words (Nat, Flag, U256, Addr), Lists of words and Maps of words; the field is %s",
                        form_name(t)) + 1;
   }
-  IrProgram program = {NULL, 0};
-  if (!lower_entries(m, ci, &program)) return 1;
+  *ci_out = ci;
+  *init_out = init;
+  return 0;
+}
+
+/* Checks the closed initial state and counts its storage words in PAIRS. */
+static const Value *lower_init(Machine *m, const CtorInfo *ci, uint32_t init, Pairs *pairs) {
   m->def = "init";
   m->fuel = EVAL_FUEL_STEPS;
   const Value *state = def_value(m, init);
-  if (state == NULL) return 1;
-  if (!val_is(state, OP_CTOR) || state->argc != ci->field_count)
-    return diag_fail(m->diag, "REFUSE_LOWER", "init", "the value of init is not a closed state") + 1;
+  if (state == NULL) return NULL;
+  if (!val_is(state, OP_CTOR) || state->argc != ci->field_count) {
+    diag_fail(m->diag, "REFUSE_LOWER", "init", "the value of init is not a closed state");
+    return NULL;
+  }
+  return lower_state(m, ci, state, pairs) ? state : NULL;
+}
+
+/* `langc abi` (C-K4-16): one line for each entry and view in source order,
+   then one line for each event in declaration order. The program must lower
+   as for `langc build`. */
+int lower_abi(Machine *m, FILE *out) {
+  const CtorInfo *ci = NULL;
+  uint32_t init = 0;
+  int refused = lower_state_ctor(m, &ci, &init);
+  if (refused != 0) return refused;
+  const char **kinds = m->def_count > 0 ? arena_alloc(m->arena, m->def_count * sizeof *kinds) : NULL;
+  IrProgram program = {NULL, 0};
+  if (m->def_count > 0 && kinds == NULL) return build_status(m, EVM_BUILD_OOM);
+  if (!lower_entries(m, ci, &program, kinds)) return 1;
   Pairs pairs = {NULL, 0};
-  if (!lower_state(m, ci, state, &pairs)) return 1;
+  if (lower_init(m, ci, init, &pairs) == NULL) return 1;
+  EvmBuild checked = evm_abi_check(&program);
+  if (checked != EVM_BUILD_OK) return build_status(m, checked);
+  for (size_t k = 0; k < program.func_count; k++) {
+    const IrFunc *f = &program.funcs[k];
+    EvmBuild status = evm_abi_line(kinds[k], f->name, f->params, f->param_count, out);
+    if (status != EVM_BUILD_OK) return build_status(m, status);
+  }
+  for (uint32_t c = 0; c < m->ctor_count; c++) {
+    const CtorInfo *e = &m->ctors[c];
+    if (!e->event) continue;
+    IrScalar *types = e->field_count > 0 ? arena_alloc(m->arena, e->field_count * sizeof *types) : NULL;
+    if (e->field_count > 0 && types == NULL) return build_status(m, EVM_BUILD_OOM);
+    for (uint32_t i = 0; i < e->field_count; i++) types[i] = scalar_of(field_type(m, e, i));
+    EvmBuild status = evm_abi_line("event", e->name, types, e->field_count, out);
+    if (status != EVM_BUILD_OK) return build_status(m, status);
+  }
+  return 0;
+}
+
+int lower_build(Machine *m, TargetPart part, FILE *out) {
+  const CtorInfo *ci = NULL;
+  uint32_t init = 0;
+  int refused = lower_state_ctor(m, &ci, &init);
+  if (refused != 0) return refused;
+  IrProgram program = {NULL, 0};
+  if (!lower_entries(m, ci, &program, NULL)) return 1;
+  Pairs pairs = {NULL, 0};
+  const Value *state = lower_init(m, ci, init, &pairs);
+  if (state == NULL) return 1;
   pairs.at = pairs.count > 0 ? arena_alloc(m->arena, pairs.count * 64u) : NULL;
   if (pairs.count > 0 && pairs.at == NULL) return diag_fail(m->diag, "OOM", NULL, "out of memory") + 1;
   pairs.count = 0;
