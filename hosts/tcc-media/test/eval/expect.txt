@@ -1,6 +1,6 @@
 entries addPrice 2 3 => 5
 entries addPrice 18446744073709551615 1 => trap
-entries scale 4294967296 4294967296 => trap
+entries times 4294967296 4294967296 => trap
 entries discount 3 5 => 0
 entries cheap 100 => 1
 entries cheap 101 => 0

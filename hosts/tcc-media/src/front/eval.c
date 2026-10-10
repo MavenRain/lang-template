@@ -24,7 +24,10 @@ static const char *const OP_NAMES[] = {
   [OP_NAT_MUL] = "natMul", [OP_NAT_EQ] = "natEq", [OP_NAT_LE] = "natLe",
   [OP_FLAG_IF] = "flagIf", [OP_PROJ] = "?",
   [OP_VIDEO] = "Video", [OP_INTERVAL] = "Interval", [OP_MK_INTERVAL] = "interval",
-  [OP_TRIM] = "trim", [OP_INTERSECT] = "intersect"
+  [OP_TRIM] = "trim", [OP_INTERSECT] = "intersect",
+  [OP_RESOLUTION] = "Resolution", [OP_MK_RES] = "res", [OP_RECT] = "Rect",
+  [OP_MK_RECT] = "rect", [OP_PAD_SPEC] = "PadSpec", [OP_MK_PAD_SPEC] = "padSpec",
+  [OP_SCALE] = "scale", [OP_CROP] = "crop", [OP_PAD] = "pad"
 };
 
 /* The number of arguments of each operation. VARIES: it comes from the
@@ -41,7 +44,9 @@ static const unsigned char OP_ARITY[] = {
   [OP_PAYLOAD] = 1, [OP_SYMM] = 1, [OP_TRANS] = 2, [OP_TRANSPORT] = 3,
   [OP_CONG] = 2, [OP_NAT_ADD] = 2, [OP_NAT_SUB] = 2, [OP_NAT_MUL] = 2,
   [OP_NAT_EQ] = 2, [OP_NAT_LE] = 2, [OP_FLAG_IF] = 3, [OP_PROJ] = 1,
-  [OP_VIDEO] = 0, [OP_INTERVAL] = 0, [OP_MK_INTERVAL] = 2, [OP_TRIM] = 2, [OP_INTERSECT] = 2
+  [OP_VIDEO] = 0, [OP_INTERVAL] = 0, [OP_MK_INTERVAL] = 2, [OP_TRIM] = 2, [OP_INTERSECT] = 2,
+  [OP_RESOLUTION] = 0, [OP_MK_RES] = 2, [OP_RECT] = 0, [OP_MK_RECT] = 4, [OP_PAD_SPEC] = 0,
+  [OP_MK_PAD_SPEC] = 5, [OP_SCALE] = 2, [OP_CROP] = 2, [OP_PAD] = 2
 };
 
 typedef enum {
@@ -791,14 +796,54 @@ static const Value *reduce_interval(Machine *m, const Value *const *a, uint32_t 
   return val_op(m, VAL_OP, OP_MK_INTERVAL, 0, 0, a, n);
 }
 
-/* video-lang K0. trim is stuck on its Video: a Video value is a neutral
-   input, and the build walks the residual term (src/media.c). The evaluator
-   never rewrites by a law (D1). */
-static const Value *reduce_trim(Machine *m, const Value *const *a, uint32_t n) {
+#define FRAME_SIZE_MAX 16384u
+#define PAD_COLOR_MAX 0xffffffu
+
+/* A width or a height is even and from 2 to FRAME_SIZE_MAX (yuv420p chroma
+   is 2x2). */
+static int bad_size(const Value *v) {
+  return v->kind == VAL_NAT && (v->nat == 0u || v->nat % 2u != 0u || v->nat > FRAME_SIZE_MAX);
+}
+
+/* video-lang M1: res w h, rect x y w h and padSpec w h x y color. An offset
+   is even, and a color is 24-bit RGB. Neutral fields and lazy overflow
+   values are kept until they are used, as for the ends of an interval. */
+static const Value *reduce_frame(Machine *m, Op op, const Value *const *a, uint32_t n) {
+  static const char *const SIDES[] = {"width", "height"};
+  static const char *const AXES[] = {"x", "y"};
+  uint32_t size = op == OP_MK_RECT ? 2u : 0u;
+  uint32_t offset = op == OP_MK_RECT ? 0u : 2u;
+  uint32_t i;
+  for (i = 0; i < 2u; i++) {
+    if (bad_size(a[size + i])) {
+      diag_fail(m->diag, "FRAME_SIZE", m->def, "the %s %llu of %s is not an even number from 2 to %u",
+        SIDES[i], (unsigned long long)a[size + i]->nat, OP_NAMES[op], FRAME_SIZE_MAX);
+      return NULL;
+    }
+  }
+  for (i = 0; op != OP_MK_RES && i < 2u; i++) {
+    if (a[offset + i]->kind == VAL_NAT && a[offset + i]->nat % 2u != 0u) {
+      diag_fail(m->diag, "FRAME_OFFSET", m->def, "the %s offset %llu of %s is odd",
+        AXES[i], (unsigned long long)a[offset + i]->nat, OP_NAMES[op]);
+      return NULL;
+    }
+  }
+  if (op == OP_MK_PAD_SPEC && a[4]->kind == VAL_NAT && a[4]->nat > PAD_COLOR_MAX) {
+    diag_fail(m->diag, "PAD_COLOR", m->def, "the color %llu of padSpec is above 0xFFFFFF",
+      (unsigned long long)a[4]->nat);
+    return NULL;
+  }
+  return val_op(m, VAL_OP, op, 0, 0, a, n);
+}
+
+/* video-lang K0 and M1. trim, scale, crop and pad are stuck on their Video:
+   a Video value is a neutral input, and the build walks the residual term
+   (src/media.c). The evaluator never rewrites by a law (D1). */
+static const Value *reduce_video(Machine *m, Op op, const Value *const *a, uint32_t n) {
   const Value *out;
-  if (blocked(m, a[1], OP_TRIM, 0, 0, a, n, &out))
+  if (blocked(m, a[1], op, 0, 0, a, n, &out))
     return out;
-  return internal(m, "trim of a Video that is not an input");
+  return internal(m, "a media operation on a Video that is not an input");
 }
 
 /* 1 when V is `interval lo hi` with numeric ends. Else *OUT is the trap or
@@ -880,11 +925,21 @@ static const Value *reduce_op(Machine *m, Op op, uint32_t inst, uint32_t field, 
   case OP_CTOR:
   case OP_VIDEO:
   case OP_INTERVAL:
+  case OP_RESOLUTION:
+  case OP_RECT:
+  case OP_PAD_SPEC:
     return val_op(m, VAL_OP, op, inst, field, a, n);
   case OP_MK_INTERVAL:
     return reduce_interval(m, a, n);
+  case OP_MK_RES:
+  case OP_MK_RECT:
+  case OP_MK_PAD_SPEC:
+    return reduce_frame(m, op, a, n);
   case OP_TRIM:
-    return reduce_trim(m, a, n);
+  case OP_SCALE:
+  case OP_CROP:
+  case OP_PAD:
+    return reduce_video(m, op, a, n);
   case OP_INTERSECT:
     return reduce_intersect(m, a, n);
   case OP_FIRST:

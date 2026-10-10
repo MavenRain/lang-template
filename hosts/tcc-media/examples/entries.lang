@@ -1,6 +1,6 @@
 -- Entries: first-order Nat and Flag definitions. The target exports them.
 def addPrice : (a : Nat) -> (b : Nat) -> Nat := fun (a : Nat) (b : Nat) => natAdd a b
-def scale : (a k : Nat) -> Nat := fun (a k : Nat) => natMul a k
+def times : (a k : Nat) -> Nat := fun (a k : Nat) => natMul a k
 def discount : (a d : Nat) -> Nat := fun (a d : Nat) => natSub a d
 def cheap : (a : Nat) -> Flag := fun (a : Nat) => natLe a 100
 def square : (n : Nat) -> Nat := fun (n : Nat) => fold (fun (acc : Nat) => natAdd acc n) 0 n

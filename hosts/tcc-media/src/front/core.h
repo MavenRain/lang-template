@@ -70,7 +70,17 @@ typedef enum {
   OP_INTERVAL,
   OP_MK_INTERVAL,
   OP_TRIM,
-  OP_INTERSECT
+  OP_INTERSECT,
+  /* video-lang M1: the spatial ops and the types of their first argument */
+  OP_RESOLUTION,
+  OP_MK_RES,
+  OP_RECT,
+  OP_MK_RECT,
+  OP_PAD_SPEC,
+  OP_MK_PAD_SPEC,
+  OP_SCALE,
+  OP_CROP,
+  OP_PAD
 } Op;
 
 /* The instance of pure, map, bind and filter (formers F5 and F8). */

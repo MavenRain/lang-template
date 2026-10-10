@@ -166,6 +166,25 @@ static int family_json(Out *o, const Value *type, const Value *v) {
   return ok && put_text(o, "}");
 }
 
+static const char *const INTERVAL_KEYS[] = {"lo", "hi"};
+static const char *const RES_KEYS[] = {"w", "h"};
+static const char *const RECT_KEYS[] = {"x", "y", "w", "h"};
+static const char *const PAD_SPEC_KEYS[] = {"w", "h", "x", "y", "color"};
+
+/* A media record (video-lang K0 and M1): one object, one Nat per key. */
+static int fields_json(Out *o, const Value *v, Op op, const char *const *keys, uint32_t n, const char *what) {
+  const Value *nat = val_make(o->m, OP_NAT, 0, 0, NULL, NULL, NULL);
+  uint32_t i;
+  int ok;
+  if (!val_is(v, op) || v->argc != n)
+    return internal(o, what);
+  ok = nat != NULL && put_text(o, "{");
+  for (i = 0; ok && i < n; i++)
+    ok = put_text(o, i == 0u ? "\"" : ",\"") && put_text(o, keys[i]) && put_text(o, "\":")
+      && value_json(o, nat, v->args[i]);
+  return ok && put_text(o, "}");
+}
+
 static int op_json(Out *o, const Value *type, const Value *v) {
   char num[24];
   switch (type->op) {
@@ -174,13 +193,14 @@ static int op_json(Out *o, const Value *type, const Value *v) {
       return internal(o, "a Nat value that is not a number");
     snprintf(num, sizeof num, "%llu", (unsigned long long)v->nat);
     return put_text(o, num);
-  case OP_INTERVAL: {
-    if (!val_is(v, OP_MK_INTERVAL) || v->argc != 2u)
-      return internal(o, "an Interval value that is not interval");
-    const Value *nat = val_make(o->m, OP_NAT, 0, 0, NULL, NULL, NULL);
-    return nat != NULL && put_text(o, "{\"lo\":") && value_json(o, nat, v->args[0])
-      && put_text(o, ",\"hi\":") && value_json(o, nat, v->args[1]) && put_text(o, "}");
-  }
+  case OP_INTERVAL:
+    return fields_json(o, v, OP_MK_INTERVAL, INTERVAL_KEYS, 2u, "an Interval value that is not interval");
+  case OP_RESOLUTION:
+    return fields_json(o, v, OP_MK_RES, RES_KEYS, 2u, "a Resolution value that is not res");
+  case OP_RECT:
+    return fields_json(o, v, OP_MK_RECT, RECT_KEYS, 4u, "a Rect value that is not rect");
+  case OP_PAD_SPEC:
+    return fields_json(o, v, OP_MK_PAD_SPEC, PAD_SPEC_KEYS, 5u, "a PadSpec value that is not padSpec");
   case OP_FLAG:
     if (val_is(v, OP_FLAG_YES))
       return put_text(o, "true");
@@ -244,6 +264,12 @@ static int op_json(Out *o, const Value *type, const Value *v) {
   case OP_MK_INTERVAL:
   case OP_TRIM:
   case OP_INTERSECT:
+  case OP_MK_RES:
+  case OP_MK_RECT:
+  case OP_MK_PAD_SPEC:
+  case OP_SCALE:
+  case OP_CROP:
+  case OP_PAD:
     return internal(o, "a type that is not a type former");
   }
   return internal(o, "an unknown operation");

@@ -66,7 +66,7 @@ typedef enum {
   RULE_TRANS,
   RULE_CONG,
   RULE_TRANSPORT,
-  RULE_NAT2,
+  RULE_NATS,
   RULE_FLAG_IF,
   RULE_MEDIA
 } Rule;
@@ -76,7 +76,7 @@ typedef struct {
   uint32_t arity; /* fold: the least number of arguments */
   Rule rule;
   Op op;
-  Op result;     /* VALUE0, NAT2: the result type. EMPTY, INJ: the type former. */
+  Op result;     /* VALUE0, NATS: the result type. EMPTY, INJ: the type former. */
   uint32_t part; /* INJ, PART, SIGMA_PART: 0 or 1 */
 } Builtin;
 
@@ -117,18 +117,28 @@ static const Builtin BUILTINS[] = {
   {"trans", 2, RULE_TRANS, OP_TRANS, OP_EQ, 0},
   {"cong", 2, RULE_CONG, OP_CONG, OP_EQ, 0},
   {"transport", 3, RULE_TRANSPORT, OP_TRANSPORT, OP_EQ, 0},
-  {"natAdd", 2, RULE_NAT2, OP_NAT_ADD, OP_NAT, 0},
-  {"natSub", 2, RULE_NAT2, OP_NAT_SUB, OP_NAT, 0},
-  {"natMul", 2, RULE_NAT2, OP_NAT_MUL, OP_NAT, 0},
-  {"natEq", 2, RULE_NAT2, OP_NAT_EQ, OP_FLAG, 0},
-  {"natLe", 2, RULE_NAT2, OP_NAT_LE, OP_FLAG, 0},
+  {"natAdd", 2, RULE_NATS, OP_NAT_ADD, OP_NAT, 0},
+  {"natSub", 2, RULE_NATS, OP_NAT_SUB, OP_NAT, 0},
+  {"natMul", 2, RULE_NATS, OP_NAT_MUL, OP_NAT, 0},
+  {"natEq", 2, RULE_NATS, OP_NAT_EQ, OP_FLAG, 0},
+  {"natLe", 2, RULE_NATS, OP_NAT_LE, OP_FLAG, 0},
   {"flagIf", 3, RULE_FLAG_IF, OP_FLAG_IF, OP_FLAG, 0},
   /* video-lang K0 (kit tcc-media) */
   {"Video", 0, RULE_TYPE0, OP_VIDEO, OP_NAT, 0},
   {"Interval", 0, RULE_TYPE0, OP_INTERVAL, OP_NAT, 0},
-  {"interval", 2, RULE_NAT2, OP_MK_INTERVAL, OP_INTERVAL, 0},
+  {"interval", 2, RULE_NATS, OP_MK_INTERVAL, OP_INTERVAL, 0},
   {"trim", 2, RULE_MEDIA, OP_TRIM, OP_VIDEO, 0},
-  {"intersect", 2, RULE_MEDIA, OP_INTERSECT, OP_OPTION, 0}
+  {"intersect", 2, RULE_MEDIA, OP_INTERSECT, OP_OPTION, 0},
+  /* video-lang M1 */
+  {"Resolution", 0, RULE_TYPE0, OP_RESOLUTION, OP_NAT, 0},
+  {"Rect", 0, RULE_TYPE0, OP_RECT, OP_NAT, 0},
+  {"PadSpec", 0, RULE_TYPE0, OP_PAD_SPEC, OP_NAT, 0},
+  {"res", 2, RULE_NATS, OP_MK_RES, OP_RESOLUTION, 0},
+  {"rect", 4, RULE_NATS, OP_MK_RECT, OP_RECT, 0},
+  {"padSpec", 5, RULE_NATS, OP_MK_PAD_SPEC, OP_PAD_SPEC, 0},
+  {"scale", 2, RULE_MEDIA, OP_SCALE, OP_VIDEO, 0},
+  {"crop", 2, RULE_MEDIA, OP_CROP, OP_VIDEO, 0},
+  {"pad", 2, RULE_MEDIA, OP_PAD, OP_VIDEO, 0}
 };
 
 #define BUILTIN_COUNT ((uint32_t)(sizeof BUILTINS / sizeof BUILTINS[0]))
@@ -852,27 +862,41 @@ static const Core *rule_transport(Call *k) {
   return op3(c, OP_TRANSPORT, 0, 3, p, e, u);
 }
 
-static const Core *rule_nat2(Call *k) {
+/* The Nat operations and the media constructors interval, res, rect and
+   padSpec: each of the arity arguments is a Nat. */
+static const Core *rule_nats(Call *k) {
   Checker *c = k->c;
-  const Core *x = check(c, k->args[0], nat_type(c));
-  const Core *y = x == NULL ? NULL : check(c, k->args[1], nat_type(c));
+  const Core **args = arena_alloc(c->m->arena, ((size_t)k->b->arity + 1u) * sizeof *args);
+  uint32_t i;
+  if (args == NULL)
+    return nul(FAIL(c, "OOM", "out of memory"));
+  for (i = 0; i < k->b->arity; i++)
+    args[i] = i == 0u || args[i - 1u] != NULL ? check(c, k->args[i], nat_type(c)) : NULL;
   k->type = tyop(c, k->b->result, 0, NULL, NULL, NULL);
-  const Core *term = op3(c, k->b->op, 0, 2, x, y, NULL);
-  /* Refuse concrete reversed bounds here. Neutral bounds are checked when
+  const Core *term = core_op(c, k->b->op, 0, 0, args, k->b->arity);
+  /* Refuse a concrete bad field of a media constructor here (INTERVAL_RANGE,
+     FRAME_SIZE, FRAME_OFFSET, PAD_COLOR). Neutral fields are checked when
      the constructor is applied to its arguments by the evaluator. */
-  if (k->b->op == OP_MK_INTERVAL && here(c, term) == NULL)
+  if (k->b->result != OP_NAT && k->b->result != OP_FLAG && here(c, term) == NULL)
     return NULL;
   return term;
 }
 
-/* video-lang K0: trim i v : Video and intersect i j : Option Interval. */
+/* The type of the first argument of a media op. */
+static Op media_first(Op op) {
+  return op == OP_SCALE ? OP_RESOLUTION : op == OP_CROP ? OP_RECT : op == OP_PAD ? OP_PAD_SPEC : OP_INTERVAL;
+}
+
+/* video-lang K0 and M1: trim i v, scale r v, crop q v and pad p v : Video,
+   and intersect i j : Option Interval. */
 static const Core *rule_media(Call *k) {
   Checker *c = k->c;
   const Value *interval = tyop(c, OP_INTERVAL, 0, NULL, NULL, NULL);
-  const Value *second = k->b->op == OP_TRIM ? tyop(c, OP_VIDEO, 0, NULL, NULL, NULL) : interval;
-  const Core *x = check(c, k->args[0], interval);
+  const Value *first = tyop(c, media_first(k->b->op), 0, NULL, NULL, NULL);
+  const Value *second = k->b->op == OP_INTERSECT ? interval : tyop(c, OP_VIDEO, 0, NULL, NULL, NULL);
+  const Core *x = check(c, k->args[0], first);
   const Core *y = x == NULL ? NULL : check(c, k->args[1], second);
-  k->type = k->b->op == OP_TRIM ? second : tyop(c, OP_OPTION, 1, interval, NULL, NULL);
+  k->type = k->b->op == OP_INTERSECT ? tyop(c, OP_OPTION, 1, interval, NULL, NULL) : second;
   return op3(c, k->b->op, 0, 2, x, y, NULL);
 }
 
@@ -943,8 +967,8 @@ static const Core *rule(Call *k) {
     return rule_cong(k);
   case RULE_TRANSPORT:
     return rule_transport(k);
-  case RULE_NAT2:
-    return rule_nat2(k);
+  case RULE_NATS:
+    return rule_nats(k);
   case RULE_FLAG_IF:
     return rule_flag_if(k);
   case RULE_MEDIA:
