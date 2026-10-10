@@ -7,9 +7,10 @@
 
    The storage layout: field i of the state is at slot i. A word field (Nat,
    Flag, U256, Addr) is one word in its slot. A List of words has its length
-   at slot s and element j at keccak256(s) + j. A Map of words has the value
-   at key k at keccak256(k . s), with k and s each as a 32-byte word. Other
-   fields give REFUSE_LOWER. */
+   n at slot s and element j at keccak256(s) + (n-1-j), thus the head is the
+   last word and a cons writes one new word (C-c9-1). A Map of words has the
+   value at key k at keccak256(k . s), with k and s each as a 32-byte word.
+   Other fields give REFUSE_LOWER. */
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -120,13 +121,15 @@ static int lower_field(Pairs *p, uint64_t i, Form form, const Value *v) {
   if (form == FORM_LIST) {
     Word base;
     uint64_t n = 0;
+    const Value *u = v;
     word_hash(base, slot, NULL);
-    for (; val_is(v, OP_CONS) && v->argc == 2; v = v->args[1], n++) {
+    for (; val_is(u, OP_CONS) && u->argc == 2; u = u->args[1]) n++;
+    if (!val_is(u, OP_NIL)) return 0;
+    for (uint64_t j = 0; j < n; j++, v = v->args[1]) {
       if (!word_of(v->args[0], value)) return 0;
-      word_add(at, base, n);
+      word_add(at, base, n - 1u - j);
       pair_add(p, at, value);
     }
-    if (!val_is(v, OP_NIL)) return 0;
     word_u64(value, n);
     pair_add(p, slot, value);
     return 1;
@@ -448,6 +451,39 @@ static int lower_map_writes(Low *l, Stmts *b, Stmts *stores, const Value *v, uin
   return value != NULL && push_store(l, stores, ir_binary(l, IR_OP_KECCAK, key, ir_const(l, field)), value);
 }
 
+/* A chain of cons over the old List FIELD: the inner cons comes first. Word k
+   of the chain (k from 0 at the inner cons) goes to BASE + N + k, with BASE =
+   keccak256(slot) and N the old length (C-c9-1). *COUNT is the next k. */
+static int lower_list_writes(Low *l, Stmts *b, Stmts *stores, const Value *v, uint32_t field, const IrExpr *base,
+                             const IrExpr *n, uint64_t *count) {
+  uint32_t f;
+  if (field_of(v, 1u, &f) && f == field) return 1;
+  if (!is_op(v, OP_CONS) || v->argc != 2)
+    return refuse(l, v, "as a List field value (want cons over the old field, or nil)");
+  if (!lower_list_writes(l, b, stores, v->args[1], field, base, n, count)) return 0;
+  const IrExpr *value = ir_set(l, b, lower_expr(l, b, v->args[0]));
+  const IrExpr *at = ir_binary(l, IR_OP_ADD64, n, ir_const(l, (*count)++));
+  return value != NULL && push_store(l, stores, ir_binary(l, IR_OP_WORD_ADD, base, at), value);
+}
+
+/* A new value of the List FIELD. nil stores the length 0 and keeps the old
+   words, which no read reaches (C-c10-1). A cons chain stores its words, then
+   the length N + count. */
+static int lower_list_write(Low *l, Stmts *b, Stmts *stores, const Value *v, uint32_t field) {
+  Word slot;
+  uint64_t count = 0;
+  if (val_is(v, OP_NIL)) return push_store(l, stores, ir_const(l, field), ir_const(l, 0));
+  IrExpr *base = new_expr(l, IR_EXPR_WORD);
+  unsigned char *w = base != NULL ? low_alloc(l, sizeof(Word)) : NULL;
+  if (w == NULL) return 0;
+  word_u64(slot, field);
+  word_hash(w, slot, NULL);
+  base->word = w;
+  const IrExpr *n = ir_set(l, b, ir_sload(l, ir_const(l, field)));
+  if (n == NULL || !lower_list_writes(l, b, stores, v, field, base, n, &count)) return 0;
+  return push_store(l, stores, ir_const(l, field), ir_binary(l, IR_OP_ADD64, n, ir_const(l, count)));
+}
+
 static int lower_state_write(Low *l, Stmts *b, const Value *st) {
   Stmts stores = {NULL, 0, 0};
   uint32_t f;
@@ -462,8 +498,10 @@ static int lower_state_write(Low *l, Stmts *b, const Value *st) {
       if (value == NULL || !push_store(l, &stores, ir_const(l, i), value)) return 0;
     } else if (form == FORM_MAP) {
       if (!lower_map_writes(l, b, &stores, v, i)) return 0;
+    } else if (form == FORM_LIST) {
+      if (!lower_list_write(l, b, &stores, v, i)) return 0;
     } else {
-      return diag_fail(l->m->diag, "REFUSE_LOWER", l->entry, "K4b does not lower a write of the List field %s",
+      return diag_fail(l->m->diag, "REFUSE_LOWER", l->entry, "the EVM build does not lower a write of the field %s",
                        l->state->fields[i].name);
     }
   }

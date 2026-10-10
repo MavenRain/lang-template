@@ -35,15 +35,16 @@ put() {
   [ "$2" = 0 ] || echo "$1 $2" >>"$tmp/want"
 }
 
-# list SLOT ARG: the length at SLOT, element j at keccak256(SLOT) + j.
+# list SLOT ARG: the length n at SLOT, element j at keccak256(SLOT) + (n-1-j) (C-c9-1).
 list() {
   base=$(build/slottool "$1")
+  len=$(printf '%s' "$2" | tr -d '()' | awk '{ for (i = 1; i <= NF; i++) if ($i != "cons" && $i != "nil") c++ } END { print c + 0 }')
   j=0
   for t in $(printf '%s' "$2" | tr -d '()'); do
     case $t in
       cons|nil) ;;
       *)
-        at=$(printf 'obase=16; ibase=16; %s + %X\n' "$(printf '%s' "$base" | tr a-f A-F)" "$j" | bc | tr A-F a-f)
+        at=$(printf 'obase=16; ibase=16; %s + %X\n' "$(printf '%s' "$base" | tr a-f A-F)" "$((len - 1 - j))" | bc | tr A-F a-f)
         put "$(pad "$at")" "$(word "$t")"
         j=$((j + 1)) ;;
     esac

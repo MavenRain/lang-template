@@ -1,0 +1,6 @@
+-- A call script for examples/lists.lang (kit slice K4c): cons writes and nil on a List field.
+-- nil on the empty List, then three cons writes (one word, two words, one word).
+100 0x00000000000000000000000000000000000000bb wipe
+101 0x00000000000000000000000000000000000000bb pushOne 7u
+102 0x00000000000000000000000000000000000000bb pushTwo 9u
+103 0x00000000000000000000000000000000000000bb pushOne 3u

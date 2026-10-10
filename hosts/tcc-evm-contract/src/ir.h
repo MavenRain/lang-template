@@ -46,7 +46,8 @@ typedef enum {
   IR_OP_ADD_TRAP,  /* the sum; traps on a word overflow (U256) */
   IR_OP_MUL_TRAP,  /* the product; traps on a word overflow (U256) */
   IR_OP_MIN,       /* the smaller operand */
-  IR_OP_KECCAK     /* keccak256(left . right), each a 32-byte word */
+  IR_OP_KECCAK,    /* keccak256(left . right), each a 32-byte word */
+  IR_OP_WORD_ADD   /* the sum modulo 2^256 (a List word slot, C-c9-1) */
 } IrOp;
 
 /* The call data that IR_EXPR_ENV reads (C-K4-12). */

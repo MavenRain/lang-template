@@ -1,0 +1,14 @@
+-- A List field (kit slice K4c): a chain of cons over the old field and nil.
+-- Element j of a List of length n is at keccak256(slot) + (n-1-j) (C-c9-1).
+state State := makeState (tally : U256) (paid : List U256)
+
+def init : State := makeState 0u nil
+
+def pushOne : (env : Env) -> (s : State) -> (x : U256) -> Option (Prod State (List Out)) :=
+  fun (env : Env) (s : State) (x : U256) => some (pair (makeState (tally s) (cons x (paid s))) nil)
+
+def pushTwo : (env : Env) -> (s : State) -> (x : U256) -> Option (Prod State (List Out)) :=
+  fun (env : Env) (s : State) (x : U256) => some (pair (makeState (u256Add (tally s) x) (cons x (cons 1u (paid s)))) nil)
+
+def wipe : (env : Env) -> (s : State) -> Option (Prod State (List Out)) :=
+  fun (env : Env) (s : State) => some (pair (makeState (tally s) nil) nil)

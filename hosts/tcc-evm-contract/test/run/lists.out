@@ -1,0 +1,5 @@
+1 wipe ok
+2 pushOne ok
+3 pushTwo ok
+4 pushOne ok
+state makeState 9u (cons 3u (cons 9u (cons 1u (cons 7u nil))))

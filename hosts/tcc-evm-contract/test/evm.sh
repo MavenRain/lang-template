@@ -130,6 +130,7 @@ chain examples/contract.lang test/run/basic.script
 chain examples/map.lang test/run/map.script
 chain examples/residuals.lang test/run/residuals.script
 chain examples/events.lang test/run/events.script
+chain examples/lists.lang test/run/lists.script
 
 rm -rf "$tmp"
 echo "evm steps: $steps checked"
