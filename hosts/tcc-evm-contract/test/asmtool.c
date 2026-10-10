@@ -48,6 +48,118 @@ static int answer(Asm *a, FILE *err) {
   return asm_finish(a, err);
 }
 
+/* MLOAD of the word at memory offset AT. */
+static void mload(Asm *a, uint64_t at) {
+  asm_push(a, at);
+  asm_op(a, EVM_OP_MLOAD);
+}
+
+/* Memory offset TO gets the call data word at offset AT. */
+static void arg(Asm *a, uint64_t at, uint64_t to) {
+  asm_push(a, at);
+  asm_op(a, EVM_OP_CALLDATALOAD);
+  asm_push(a, to);
+  asm_op(a, EVM_OP_MSTORE);
+}
+
+/* Returns the word VALUE. */
+static void return_word(Asm *a, uint64_t value) {
+  asm_push(a, value);
+  asm_op(a, EVM_OP_PUSH0);
+  asm_op(a, EVM_OP_MSTORE);
+  asm_push(a, 32);
+  asm_op(a, EVM_OP_PUSH0);
+  asm_op(a, EVM_OP_RETURN);
+}
+
+/* The mock ERC-20 token of slice K4d (C-K4d-3) for the CALL tests: the
+   runtime of transfer(address,uint256) (from is the caller) and
+   transferFrom(address,address,uint256). Slot 0 is the mode: 0 moves and
+   returns the word 1, 1 returns the word 0 with no move, 2 moves and returns
+   empty data, any other mode reverts. The balance of an address is at the
+   slot equal to the address word. A move has no balance check and no
+   allowance check (wrapping SUB, then ADD: a move to the sender keeps the
+   balance) and makes one LOG3 Transfer(from, to) with the amount as data.
+   Memory: 0x00 the amount, 0x20 from, 0x40 to. Another selector reverts. */
+static int mock(Asm *a, FILE *err) {
+  const char *event = "Transfer(address,address,uint256)";
+  unsigned char topic[32];
+  keccak256((const unsigned char *)event, strlen(event), topic);
+  asm_init(a);
+  Label transfer = asm_label(a);
+  Label from = asm_label(a);
+  Label move = asm_label(a);
+  Label stop = asm_label(a);
+  Label no = asm_label(a);
+  Label revert = asm_label(a);
+  asm_op(a, EVM_OP_PUSH0);
+  asm_op(a, EVM_OP_CALLDATALOAD);
+  asm_push(a, 0xe0);
+  asm_op(a, EVM_OP_SHR);
+  asm_op(a, EVM_OP_DUP1);
+  asm_push(a, 0xa9059cbb);
+  asm_op(a, EVM_OP_EQ);
+  asm_jump_if(a, transfer);
+  asm_push(a, 0x23b872dd);
+  asm_op(a, EVM_OP_EQ);
+  asm_jump_if(a, from);
+  asm_jump(a, revert);
+  asm_jumpdest(a, transfer);
+  asm_op(a, EVM_OP_POP);
+  asm_op(a, EVM_OP_CALLER);
+  asm_push(a, 0x20);
+  asm_op(a, EVM_OP_MSTORE);
+  arg(a, 0x04, 0x40);
+  arg(a, 0x24, 0x00);
+  asm_jump(a, move);
+  asm_jumpdest(a, from);
+  arg(a, 0x04, 0x20);
+  arg(a, 0x24, 0x40);
+  arg(a, 0x44, 0x00);
+  asm_jumpdest(a, move);
+  asm_op(a, EVM_OP_PUSH0);
+  asm_op(a, EVM_OP_SLOAD);
+  asm_op(a, EVM_OP_DUP1);
+  asm_push(a, 2);
+  asm_op(a, EVM_OP_LT); /* 2 < mode */
+  asm_jump_if(a, revert);
+  asm_op(a, EVM_OP_DUP1);
+  asm_push(a, 1);
+  asm_op(a, EVM_OP_EQ);
+  asm_jump_if(a, no);
+  mload(a, 0x00);
+  mload(a, 0x20);
+  asm_op(a, EVM_OP_SLOAD);
+  asm_op(a, EVM_OP_SUB);
+  mload(a, 0x20);
+  asm_op(a, EVM_OP_SSTORE);
+  mload(a, 0x00);
+  mload(a, 0x40);
+  asm_op(a, EVM_OP_SLOAD);
+  asm_op(a, EVM_OP_ADD);
+  mload(a, 0x40);
+  asm_op(a, EVM_OP_SSTORE);
+  mload(a, 0x40); /* topic 2: to */
+  mload(a, 0x20); /* topic 1: from */
+  asm_push_word(a, topic);
+  asm_push(a, 32);
+  asm_op(a, EVM_OP_PUSH0);
+  asm_op(a, EVM_OP_LOG3);
+  asm_push(a, 2);
+  asm_op(a, EVM_OP_EQ);
+  asm_jump_if(a, stop);
+  return_word(a, 1);
+  asm_jumpdest(a, stop);
+  asm_op(a, EVM_OP_STOP);
+  asm_jumpdest(a, no);
+  return_word(a, 0);
+  asm_jumpdest(a, revert);
+  asm_op(a, EVM_OP_PUSH0);
+  asm_op(a, EVM_OP_PUSH0);
+  asm_op(a, EVM_OP_REVERT);
+  return asm_finish(a, err);
+}
+
 static int check_answer(const Asm *a) {
   static const char want[] = "61000d565b602a5f5260205ff35b61000456";
   char text[2 * sizeof want];
@@ -108,12 +220,14 @@ static int checks(const Asm *runtime) {
 int main(int argc, char **argv) {
   static Asm runtime;
   static Asm creation;
+  static Asm token;
   const char *mode = argc == 2 ? argv[1] : "";
-  if (argc > 2) return fputs("usage: asmtool [runtime|creation|abi]\n", stderr), 2;
+  if (argc > 2) return fputs("usage: asmtool [runtime|creation|abi|mock]\n", stderr), 2;
   if (!answer(&runtime, stderr)) return 1;
+  if (strcmp(mode, "mock") == 0) return mock(&token, stderr) && asm_write_hex(&token, stdout, stderr) ? 0 : 1;
   if (strcmp(mode, "runtime") == 0) return asm_write_hex(&runtime, stdout, stderr) ? 0 : 1;
   if (strcmp(mode, "creation") == 0) return asm_creation(&creation, &runtime, stderr) && asm_write_hex(&creation, stdout, stderr) ? 0 : 1;
   if (strcmp(mode, "abi") == 0) return abi(stdout, stderr) ? 0 : 1;
-  if (argc == 2) return fputs("usage: asmtool [runtime|creation|abi]\n", stderr), 2;
+  if (argc == 2) return fputs("usage: asmtool [runtime|creation|abi|mock]\n", stderr), 2;
   return checks(&runtime);
 }

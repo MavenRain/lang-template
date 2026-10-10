@@ -32,21 +32,6 @@ wantlogs() {
   done <"$tmp/events"
 }
 
-# logs CALLER INPUT: the logs of the step on tmp/pre.json (the LOGS block of
-# `evm run --debug`), one line for each LOG: the topics and the data.
-logs() {
-  evm run --debug --prestate "$tmp/pre.json" --receiver "0x$receiver" --sender "$1" --input "$2" \
-    >"$tmp/debug" 2>&1 </dev/null || return 1
-  awk '
-    /^#### LOGS ####/ { p = 1; next }
-    /^####/ { p = 0 }
-    !p { next }
-    /^LOG[0-4]:/ { if (n) print t " " (d == "" ? "-" : d); n = 1; t = ""; d = ""; next }
-    length($2) == 64 { t = t (t == "" ? "" : ",") $2; next }
-    { for (i = 2; i <= NF && $i ~ /^[0-9a-f][0-9a-f]$/; i++) d = d $i }
-    END { if (n) print t " " (d == "" ? "-" : d) }' "$tmp/debug" >"$tmp/gotlogs"
-}
-
 # chain PROG SCRIPT: deploy PROG, then one step for each call of SCRIPT.
 chain() {
   _prog=$1 _script=$2
