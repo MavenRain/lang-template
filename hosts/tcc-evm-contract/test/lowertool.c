@@ -172,6 +172,10 @@ static int abi_boundaries(void) {
 
 int main(void) {
   int ok = 1;
+  ok &= abi_regression("list-cons-other-field",
+    "state State := makeState (items : List U256) (other : List U256)\n"
+    "def init : State := makeState nil nil\n"
+    ENTRY "some (pair (makeState (cons 1u (other s)) (other s)) nil)\n", "REFUSE_LOWER", NULL);
   ok &= abi_regression("init-trap",
     "state State := makeState (n : U256)\n"
     "def init : State := makeState (u256Div 1u 0u)\n"

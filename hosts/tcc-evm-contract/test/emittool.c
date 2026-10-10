@@ -34,6 +34,24 @@ static int execute(const char *name, Asm *a, const unsigned char *want, int trap
   return ok;
 }
 
+/* The word on the stack goes to memory 0 and is the result (32 bytes); the
+   revert and trap labels end in REVERT. */
+static int finish(const char *name, Asm *a, const Emit *e, const unsigned char *want, int trap) {
+  emit_store(a, 0);
+  asm_push(a, 32);
+  asm_op(a, EVM_OP_PUSH0);
+  asm_op(a, EVM_OP_RETURN);
+  asm_jumpdest(a, e->revert);
+  asm_op(a, EVM_OP_PUSH0);
+  asm_op(a, EVM_OP_PUSH0);
+  asm_op(a, EVM_OP_REVERT);
+  asm_jumpdest(a, e->trap);
+  asm_op(a, EVM_OP_PUSH0);
+  asm_op(a, EVM_OP_PUSH0);
+  asm_op(a, EVM_OP_REVERT);
+  return execute(name, a, want, trap);
+}
+
 static int expression(const char *name, const IrExpr *expr, const unsigned char *want, int trap,
                       const unsigned char *slot, int write) {
   Asm *a = calloc(1, sizeof *a);
@@ -55,19 +73,29 @@ static int expression(const char *name, const IrExpr *expr, const unsigned char 
     ok = emit_expr(&e, expr);
   }
   if (!ok) { free(a); return 0; }
-  emit_store(a, 0);
-  asm_push(a, 32);
-  asm_op(a, EVM_OP_PUSH0);
-  asm_op(a, EVM_OP_RETURN);
-  asm_jumpdest(a, e.revert);
-  asm_op(a, EVM_OP_PUSH0);
-  asm_op(a, EVM_OP_PUSH0);
-  asm_op(a, EVM_OP_REVERT);
-  asm_jumpdest(a, e.trap);
-  asm_op(a, EVM_OP_PUSH0);
-  asm_op(a, EVM_OP_PUSH0);
-  asm_op(a, EVM_OP_REVERT);
-  return execute(name, a, want, trap);
+  return finish(name, a, &e, want, trap);
+}
+
+/* local 1 := 0; REPEAT COUNT { local 1 := local 1 + 3 } (counter local 2); the
+   result is local 1. */
+static int repeat(const char *name, uint64_t count, uint64_t want) {
+  Asm *a = calloc(1, sizeof *a);
+  if (a == NULL) return 0;
+  Emit e = {a, 32, asm_label(a), asm_label(a), EVM_BUILD_IR};
+  const IrExpr zero = {.kind = IR_EXPR_CONST, .value = 0};
+  const IrExpr three = {.kind = IR_EXPR_CONST, .value = 3};
+  const IrExpr times = {.kind = IR_EXPR_CONST, .value = count};
+  const IrExpr acc = {.kind = IR_EXPR_LOCAL, .local = 1};
+  const IrExpr sum = {.kind = IR_EXPR_BINARY, .op = IR_OP_ADD64, .left = &acc, .right = &three};
+  const IrStmt step = {.kind = IR_STMT_SET, .local = 1, .expr = &sum};
+  const IrStmt *const items[] = {&step};
+  const IrStmt start = {.kind = IR_STMT_SET, .local = 1, .expr = &zero};
+  const IrStmt loop = {.kind = IR_STMT_REPEAT, .counter = 2, .expr = &times, .body = {items, 1}};
+  unsigned char word[32] = {0};
+  for (size_t i = 0; i < 8; i++) word[31 - i] = (unsigned char)(want >> (8 * i));
+  if (!emit_stmt(&e, &start) || !emit_stmt(&e, &loop)) { free(a); return 0; }
+  emit_load(a, 32);
+  return finish(name, a, &e, word, 0);
 }
 
 static int binary(const char *name, IrOp op, uint64_t left, uint64_t right, uint64_t want, int trap) {
@@ -130,6 +158,8 @@ int main(void) {
   ok &= expression("u256-mul-overflow", &mul_over, NULL, 1, NULL, 0);
   ok &= expression("u256-mul-right-zero", &mul_zero, zero, 0, NULL, 0);
   ok &= expression("nested-map-hash", &nested, nested_hash, 0, NULL, 0);
+  ok &= repeat("repeat-five", 5, 15);
+  ok &= repeat("repeat-zero", 0, 0);
   if (ok) printf("emit: %u execution regressions passed\n", executions);
   else puts("emit: failures");
   return !ok;

@@ -293,9 +293,26 @@ static int emit_stmt(Emit *e, const IrStmt *s) {
     asm_op(a, EVM_OP_LOG1);
     return 1;
   }
+  case IR_STMT_REPEAT: { /* as Wasm: the body sees the counter values N down to 1 */
+    Label top = asm_label(a), end = asm_label(a);
+    uint64_t at = 32u * (uint64_t)s->counter;
+    if (!emit_expr(e, s->expr)) return 0;
+    emit_store(a, at);
+    asm_jumpdest(a, top);
+    emit_load(a, at);
+    asm_op(a, EVM_OP_ISZERO);
+    asm_jump_if(a, end);
+    if (!emit_block(e, s->body)) return 0;
+    asm_push(a, 1);
+    emit_load(a, at);
+    asm_op(a, EVM_OP_SUB);
+    emit_store(a, at);
+    asm_jump(a, top);
+    asm_jumpdest(a, end);
+    return 1;
+  }
   case IR_STMT_ALLOC:
   case IR_STMT_SWITCH:
-  case IR_STMT_REPEAT:
   case IR_STMT_WHILE: return 0;
   }
   return 0;
