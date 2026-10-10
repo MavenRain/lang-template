@@ -1,0 +1,41 @@
+-- examples/contract.lang with nil in place of the pull of deposit and the pay of withdraw (C-K4d-5).
+-- `langc build` refuses pay and pull until the CALL lowering of slice K4d (C-K4d-1), thus the build,
+-- ABI and chain tests use this copy. The state, the selectors and the storage rows stay the same.
+state State := makeState (owner : Addr) (held : U256) history (earned : U256) (cursor : Nat)
+
+def asset : Addr := 0x00000000000000000000000000000000000000ee
+def vault : Addr := 0x00000000000000000000000000000000000000cc
+
+-- The event of stamp (slice K4a1). `langc build` refuses emit (C-K4c-2).
+event Stamped (held : U256) (earned : U256)
+
+-- The start state of `langc run` (K3b).
+def init : State := makeState 0x00000000000000000000000000000000000000aa 0u 0u 0
+
+-- Entry: add the amount to held (no pull).
+def deposit : (env : Env) -> (s : State) -> (amount : U256) -> Option (Prod State (List Out)) :=
+  fun (env : Env) (s : State) (amount : U256) =>
+    some (pair (makeState (owner s) (u256Add (held s) amount) (earned s) (cursor s))
+      nil)
+
+-- Entry: move the amount from held to earned (no pay). Revert (none) when the amount is above held.
+def withdraw : (env : Env) -> (s : State) -> (amount : U256) -> Option (Prod State (List Out)) :=
+  fun (env : Env) (s : State) (amount : U256) =>
+    flagIf (u256Le amount (held s))
+      (some (pair (makeState (owner s) (u256Sub (held s) amount) (u256Add (earned s) amount) (cursor s))
+        nil))
+      none
+
+-- Entry with no arguments: record the time and log held and earned (event Stamped).
+def stamp : (env : Env) -> (s : State) -> Option (Prod State (List Out)) :=
+  fun (env : Env) (s : State) =>
+    some (pair (makeState (owner s) (held s) (earned s) (now env))
+      (cons (Stamped (held s) (earned s)) nil))
+
+-- Helper (no Env): add to the history field earned.
+def checkpoint : State -> U256 -> State :=
+  fun (s : State) (x : U256) => makeState (owner s) (held s) (u256Add (earned s) x) (cursor s)
+def checked : State := checkpoint init 7u
+
+-- View.
+def balance : (env : Env) -> (s : State) -> U256 := fun (env : Env) (s : State) => held s

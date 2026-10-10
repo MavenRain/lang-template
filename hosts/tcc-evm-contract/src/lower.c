@@ -598,6 +598,17 @@ static int is_emit(const Low *l, const Value *v) {
          && strcmp(l->m->families[c->family].name, "Out") == 0 && strcmp(c->name, "emit") == 0;
 }
 
+/* The name of V when V is the prelude constructor pay or pull of Out, else
+   NULL. The CALL lowering of slice K4d is not done yet, thus an entry that
+   makes a pay or a pull gives REFUSE_LOWER and no build drops a transfer
+   (C-K4d-1). */
+static const char *out_call(const Low *l, const Value *v) {
+  const CtorInfo *c = is_op(v, OP_CTOR) && v->inst < l->m->ctor_count ? &l->m->ctors[v->inst] : NULL;
+  return c != NULL && !c->event && c->family < l->m->family_count
+         && strcmp(l->m->families[c->family].name, "Out") == 0
+         && (strcmp(c->name, "pay") == 0 || strcmp(c->name, "pull") == 0) ? c->name : NULL;
+}
+
 static IrScalar scalar_of(const Value *t);
 
 /* An event in the OUT list (C-K4-13): force each field word, then one LOG
@@ -626,9 +637,12 @@ static int lower_log(Low *l, Stmts *b, const CtorInfo *c, const Value *v) {
 static int lower_out_words(Low *l, Stmts *b, const Value *v) {
   uint32_t field;
   const CtorInfo *c = is_op(v, OP_CTOR) && v->inst < l->m->ctor_count ? &l->m->ctors[v->inst] : NULL;
+  const char *call = out_call(l, v);
   if (val_is(v, OP_NIL)) return 1;
   if (is_emit(l, v))
     return diag_fail(l->m->diag, "REFUSE_LOWER", l->entry, "emit has no EVM form; use a named event");
+  if (call != NULL)
+    return diag_fail(l->m->diag, "REFUSE_LOWER", l->entry, "%s has no EVM form yet; the CALL lowering comes in slice K4d", call);
   if (c != NULL && c->event) return lower_log(l, b, c, v);
   if (is_op(v, OP_FLAG_IF) && v->argc == 3) {
     const IrExpr *cond = lower_expr(l, b, v->args[0]);

@@ -1,0 +1,9 @@
+-- REFUSE_LOWER (slice K4d s2, C-K4d-1): an entry that makes a pay. The CALL lowering comes in slice K4d.
+-- Until then the build refuses the entry, thus no contract drops a transfer.
+state State := makeState (held : U256)
+def asset : Addr := 0x00000000000000000000000000000000000000ee
+def init : State := makeState 0u
+
+def give : (env : Env) -> (s : State) -> (amount : U256) -> Option (Prod State (List Out)) :=
+  fun (env : Env) (s : State) (amount : U256) =>
+    some (pair (makeState (u256Sub (held s) amount)) (cons (pay asset (caller env) amount) nil))

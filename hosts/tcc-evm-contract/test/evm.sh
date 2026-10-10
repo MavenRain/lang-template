@@ -103,19 +103,19 @@ chain() {
   done
 }
 
-# The `langc abi --text` lines (C-K4-16) of each chain program and of one
-# refused program equal test/abi.expect. Each selector and topic there equals
+# The `langc abi --text` lines (C-K4-16) of each chain program and of three
+# refused programs (emit, pay, pull) equal test/abi.expect. Each selector and topic there equals
 # the output of `cast sig` or `cast sig-event` (foundry cast 0.3.0, K4c s6).
 # The gate does not run cast.
-for _p in examples/contract.lang examples/map.lang examples/residuals.lang examples/events.lang \
-  test/lower/emit.lang; do
+for _p in test/contract-nocall.lang examples/map.lang examples/residuals.lang examples/events.lang \
+  test/lower/emit.lang test/lower/pay.lang test/lower/pull.lang; do
   echo "# $_p --text"
   build/langc abi "$_p" --text 2>&1
   echo "exit $?"
 done >"$tmp/abi.got"
 # The JSON ABI (Q-K4-3, the default since C-c7-1) of the two programs with
 # events. `cast interface` reads each array (K4c s8). The gate does not run cast.
-for _p in examples/contract.lang examples/events.lang; do
+for _p in test/contract-nocall.lang examples/events.lang; do
   echo "# $_p"
   build/langc abi "$_p" 2>&1
   echo "exit $?"
@@ -132,7 +132,7 @@ if ! cmp -s test/abi.expect "$tmp/abi.got"; then
   fail=$((fail + 1))
 fi
 
-chain examples/contract.lang test/run/basic.script
+chain test/contract-nocall.lang test/run/basic.script
 chain examples/map.lang test/run/map.script
 chain examples/residuals.lang test/run/residuals.script
 chain examples/events.lang test/run/events.script

@@ -168,7 +168,7 @@ static int abi_boundaries(void) {
 }
 
 #define ENTRY "def entry : Env -> State -> Option (Prod State (List Out)) := fun env s => "
-#define TOKEN "0x00000000000000000000000000000000000000aa"
+#define LOGGED "event Logged (x : U256)\n"
 
 /* Compare a closed reference fold and the build boundary for its open view. */
 static int fold_regression(const char *name, const char *step, const char *seed, int expected, int refused) {
@@ -270,7 +270,7 @@ int main(void) {
     "{\"type\":\"event\",\"name\":\"Paid\",\"inputs\":[{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false}],\"anonymous\":false}\n"
     "]\n", 1);
   ok &= abi_boundaries();
-  int output_status = system("build/langc abi examples/contract.lang 1</dev/null 2>/dev/null");
+  int output_status = system("build/langc abi test/contract-nocall.lang 1</dev/null 2>/dev/null");
   if (output_status == -1 || !WIFEXITED(output_status) || WEXITSTATUS(output_status) != 2) {
     fprintf(stderr, "FAIL abi buffered-write (status %d)\n", output_status);
     ok = 0;
@@ -289,26 +289,26 @@ int main(void) {
     "fun env s a b c d e f g h i j k l m n o p => some (pair (makeState p) nil)\n",
     1, 16, 0, 0, 0, 0);
   ok &= regression("fresh-fuel", ENTRY "some (pair s nil)\n", 1, 0, 0, 0, 0, 1);
-  ok &= regression("pay-ok", ENTRY
-    "some (pair (makeState 9) (cons (pay " TOKEN " " TOKEN " 7u) nil))\n",
+  ok &= regression("out-ok", LOGGED ENTRY
+    "some (pair (makeState 9) (cons (Logged 7u) nil))\n",
     1, 0, 0, 0, 0, 0);
-  ok &= regression("pay-trap", ENTRY
-    "some (pair (makeState 9) (cons (pay " TOKEN " " TOKEN " (u256Div 7u 0u)) nil))\n",
+  ok &= regression("out-trap-second", LOGGED ENTRY
+    "some (pair (makeState 9) (cons (Logged 7u) (cons (Logged (u256Div 7u 0u)) nil)))\n",
     1, 0, 1, 0, 0, 0);
-  ok &= regression("event-fields-trap", "event Logged (x : U256)\n" ENTRY
+  ok &= regression("event-fields-trap", LOGGED ENTRY
     "some (pair (makeState 9) (cons (Logged (u256Div 7u 0u)) nil))\n",
     1, 0, 1, 0, 0, 0);
-  ok &= regression("pay-symbolic-div",
+  ok &= regression("out-symbolic-div", LOGGED
     "def entry : Env -> State -> U256 -> Option (Prod State (List Out)) := fun env s x => "
-    "some (pair (makeState 9) (cons (pay " TOKEN " " TOKEN " (u256Div 7u x)) nil))\n",
+    "some (pair (makeState 9) (cons (Logged (u256Div 7u x)) nil))\n",
     1, 1, 0, 1, 0, 0);
-  ok &= regression("lazy-output-field",
+  ok &= regression("lazy-output-field", LOGGED
     "def entry : Env -> State -> Flag -> Option (Prod State (List Out)) := fun env s f => "
-    "some (pair (makeState 9) (cons (pay " TOKEN " " TOKEN " (flagIf f 7u (u256Div 7u 0u))) nil))\n",
+    "some (pair (makeState 9) (cons (Logged (flagIf f 7u (u256Div 7u 0u))) nil))\n",
     1, 1, 1, 0, 1, 0);
-  ok &= regression("lazy-output-list",
+  ok &= regression("lazy-output-list", LOGGED
     "def entry : Env -> State -> Flag -> Option (Prod State (List Out)) := fun env s f => "
-    "some (pair (makeState 9) (flagIf f nil (cons (pay " TOKEN " " TOKEN " (u256Div 7u 0u)) nil)))\n",
+    "some (pair (makeState 9) (flagIf f nil (cons (Logged (u256Div 7u 0u)) nil)))\n",
     1, 1, 1, 0, 1, 0);
   if (ok) puts("lower regressions: passed");
   return ok ? 0 : 1;

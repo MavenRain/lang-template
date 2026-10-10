@@ -9,3 +9,5 @@ list-write.lang REFUSE_LOWER
 list-nil-tail.lang REFUSE_LOWER
 nat-fold.lang REFUSE_LOWER
 emit.lang REFUSE_LOWER
+pay.lang REFUSE_LOWER
+pull.lang REFUSE_LOWER
