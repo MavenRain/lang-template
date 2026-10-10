@@ -215,6 +215,7 @@ Storage layout:
 - Field i of the state is at slot i. A `history` field uses the rule of its type.
 - Words: Nat is a u64 in the low bits. Flag is 0 or 1. U256 is the full word. Addr is in the low 160 bits.
 - A `List T` field at slot s (T is a word type): the length n is at slot s. Element j is at slot keccak256(s) + (n-1-j), thus the head is the last word (C-c9-1). An entry can set the field to a chain of `cons` over the old field (the new words go above the old words, then the length) or to `nil` (the length 0; the old words stay and no read reaches them, C-c10-1). Each other List value gives REFUSE_LOWER.
+- A `fold` over a List field scans from the last element to the head (the right fold). Its seed and step must lower to words. If either computation can trap, the step must be provably strict in its accumulator; otherwise the build gives REFUSE_LOWER, because an eager EVM trap cannot be discarded by a later iteration.
 - A `Map K V` field at slot s (K and V are word types): the value at key k is at slot keccak256(k . s). k and s are 32-byte big-endian words. A key that is not in the map reads as zero.
 
 Dispatch (slice K4b):

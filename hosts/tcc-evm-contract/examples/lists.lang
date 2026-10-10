@@ -1,4 +1,4 @@
--- A List field (kit slice K4c): a chain of cons over the old field and nil.
+-- A List field (kit slice K4c): a chain of cons over the old field and nil, and a fold over the field.
 -- Element j of a List of length n is at keccak256(slot) + (n-1-j) (C-c9-1).
 state State := makeState (tally : U256) (paid : List U256)
 
@@ -12,3 +12,12 @@ def pushTwo : (env : Env) -> (s : State) -> (x : U256) -> Option (Prod State (Li
 
 def wipe : (env : Env) -> (s : State) -> Option (Prod State (List Out)) :=
   fun (env : Env) (s : State) => some (pair (makeState (tally s) nil) nil)
+
+def settle : (env : Env) -> (s : State) -> Option (Prod State (List Out)) :=
+  fun (env : Env) (s : State) => some (pair (makeState (fold (fun (x : U256) (acc : U256) => u256Add x acc) 0u (paid s)) (paid s)) nil)
+
+def paidSum : (env : Env) -> (s : State) -> U256 :=
+  fun (env : Env) (s : State) => fold (fun (x : U256) (acc : U256) => u256Add x acc) 0u (paid s)
+
+def weighted : (env : Env) -> (s : State) -> U256 :=
+  fun (env : Env) (s : State) => fold (fun (x : U256) (acc : U256) => u256Add x (u256Mul acc 10u)) 0u (paid s)

@@ -1,6 +1,14 @@
--- A call script for examples/lists.lang (kit slice K4c): cons writes and nil on a List field.
--- nil on the empty List, then three cons writes (one word, two words, one word).
+-- A call script for examples/lists.lang (kit slice K4c): cons writes and nil on a List field, and folds over it.
+-- nil on the empty List, then three cons writes (one word, two words, one word). The view paidSum is the sum;
+-- the view weighted gives the elements as digits from the last element to the head; settle writes the sum to tally.
 100 0x00000000000000000000000000000000000000bb wipe
-101 0x00000000000000000000000000000000000000bb pushOne 7u
-102 0x00000000000000000000000000000000000000bb pushTwo 9u
-103 0x00000000000000000000000000000000000000bb pushOne 3u
+101 0x00000000000000000000000000000000000000bb paidSum
+102 0x00000000000000000000000000000000000000bb pushOne 7u
+103 0x00000000000000000000000000000000000000bb paidSum
+104 0x00000000000000000000000000000000000000bb pushTwo 9u
+105 0x00000000000000000000000000000000000000bb paidSum
+106 0x00000000000000000000000000000000000000bb weighted
+107 0x00000000000000000000000000000000000000bb pushOne 3u
+108 0x00000000000000000000000000000000000000bb paidSum
+109 0x00000000000000000000000000000000000000bb weighted
+110 0x00000000000000000000000000000000000000bb settle

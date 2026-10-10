@@ -375,6 +375,27 @@ static int form_at(Low *l, uint32_t field) {
 
 static const IrExpr *lower_expr(Low *l, Stmts *b, const Value *v);
 
+/* B gets LOCAL := E. */
+static int push_set(Low *l, Stmts *b, uint32_t local, const IrExpr *e) {
+  IrStmt *s = e != NULL ? new_stmt(l, IR_STMT_SET) : NULL;
+  if (s == NULL) return 0;
+  s->local = local;
+  s->expr = e;
+  return push(l, b, s);
+}
+
+/* BASE = keccak256(slot) of the List FIELD: the word of element n-1 (C-c9-1). */
+static const IrExpr *list_base(Low *l, uint32_t field) {
+  Word slot;
+  IrExpr *base = new_expr(l, IR_EXPR_WORD);
+  unsigned char *w = base != NULL ? low_alloc(l, sizeof(Word)) : NULL;
+  if (w == NULL) return NULL;
+  word_u64(slot, field);
+  word_hash(w, slot, NULL);
+  base->word = w;
+  return base;
+}
+
 /* flagIf at a word position: an IF that sets one local in each branch. */
 static const IrExpr *lower_if_value(Low *l, Stmts *b, const Value *v) {
   const IrExpr *cond = lower_expr(l, b, v->args[0]);
@@ -382,19 +403,73 @@ static const IrExpr *lower_if_value(Low *l, Stmts *b, const Value *v) {
   Stmts arms[2] = {{NULL, 0, 0}, {NULL, 0, 0}};
   IrStmt *s = cond != NULL ? new_stmt(l, IR_STMT_IF) : NULL;
   for (int k = 0; s != NULL && k < 2; k++) {
-    const IrExpr *e = lower_expr(l, &arms[k], v->args[1 + k]);
-    IrStmt *set = e != NULL ? new_stmt(l, IR_STMT_SET) : NULL;
-    if (set != NULL) {
-      set->local = local;
-      set->expr = e;
-    }
-    if (!push(l, &arms[k], set)) s = NULL;
+    if (!push_set(l, &arms[k], local, lower_expr(l, &arms[k], v->args[1 + k]))) s = NULL;
   }
   if (s == NULL) return NULL;
   s->expr = cond;
   s->body = block_of(&arms[0]);
   s->otherwise = block_of(&arms[1]);
   return push(l, b, s) ? ir_local(l, local) : NULL;
+}
+
+/* The eager IR cannot carry a trapped accumulator into the next iteration.
+   It is sound when no computation can trap, or when F cannot discard a trap. */
+static int expr_may_trap(const IrExpr *e) {
+  if (e == NULL) return 0;
+  if (e->kind == IR_EXPR_BINARY && (e->op == IR_OP_DIV || e->op == IR_OP_ADD64 || e->op == IR_OP_MUL64 ||
+      e->op == IR_OP_ADD_TRAP || e->op == IR_OP_MUL_TRAP)) return 1;
+  return expr_may_trap(e->left) || expr_may_trap(e->right);
+}
+
+static int block_may_trap(IrBlock b) {
+  for (size_t i = 0; i < b.count; i++) {
+    const IrStmt *s = b.items[i];
+    if (s->kind == IR_STMT_TRAP || expr_may_trap(s->expr) || expr_may_trap(s->value) ||
+        block_may_trap(s->body) || block_may_trap(s->otherwise)) return 1;
+  }
+  return 0;
+}
+
+/* A symbolic application to a trap proves strictness only on every path. */
+static int must_trap(const Value *v) {
+  if (v == NULL) return 0;
+  if (v->kind == VAL_TRAP) return 1;
+  return is_op(v, OP_FLAG_IF) && v->argc == 3 &&
+    (must_trap(v->args[0]) || (must_trap(v->args[1]) && must_trap(v->args[2])));
+}
+
+/* fold F Z over the List FIELD. Element j of n is at BASE + (n-1-j) (C-c9-1),
+   thus the scan k = 0 to n-1 gives the right fold: acc := F (word at BASE + k)
+   acc. The step is F applied to the levels of the locals X and ACC (F-c12-1). */
+static const IrExpr *lower_fold(Low *l, Stmts *b, const Value *v, uint32_t field) {
+  Stmts init = {NULL, 0, 0}, body = {NULL, 0, 0};
+  const IrExpr *base = list_base(l, field);
+  uint32_t acc = l->locals++, k = l->locals++, x = l->locals++;
+  if (base == NULL || !push_set(l, &init, acc, lower_expr(l, &init, v->args[1])) ||
+      !push_set(l, &init, k, ir_const(l, 0)))
+    return NULL;
+  if (!push_set(l, &body, x, ir_sload(l, ir_binary(l, IR_OP_WORD_ADD, base, ir_local(l, k))))) return NULL;
+  l->m->fuel = EVAL_FUEL_STEPS;
+  const Value *fx = apply_value(l->m, v->args[0], val_var(l->m, x + 2u));
+  const Value *step = fx != NULL ? apply_value(l->m, fx, val_var(l->m, acc + 2u)) : NULL;
+  if (!push_set(l, &body, acc, lower_expr(l, &body, step))) return NULL;
+  if (block_may_trap(block_of(&init)) || block_may_trap(block_of(&body))) {
+    static const Value trapped = {.kind = VAL_TRAP};
+    l->m->fuel = EVAL_FUEL_STEPS;
+    const Value *strict = apply_value(l->m, fx, &trapped);
+    if (strict == NULL) return NULL;
+    if (!must_trap(strict))
+      return refuse(l, v, "(a fold that can discard a trapped accumulator)"), NULL;
+  }
+  if (!push_set(l, &body, k, ir_binary(l, IR_OP_ADD64, ir_local(l, k), ir_const(l, 1)))) return NULL;
+  for (size_t i = 0; i < init.count; i++)
+    if (!push(l, b, init.items[i])) return NULL;
+  IrStmt *s = new_stmt(l, IR_STMT_REPEAT);
+  if (s == NULL) return NULL;
+  s->counter = l->locals++;
+  s->expr = ir_sload(l, ir_const(l, field));
+  s->body = block_of(&body);
+  return push(l, b, s) ? ir_local(l, acc) : NULL;
 }
 
 static const IrExpr *lower_expr(Low *l, Stmts *b, const Value *v) {
@@ -423,6 +498,8 @@ static const IrExpr *lower_expr(Low *l, Stmts *b, const Value *v) {
     return ir_sload(l, ir_binary(l, IR_OP_KECCAK, key, key != NULL ? ir_const(l, f) : NULL));
   }
   if (is_op(v, OP_FLAG_IF) && v->argc == 3) return lower_if_value(l, b, v);
+  if (is_op(v, OP_FOLD_LIST) && v->argc == 3 && field_of(v->args[2], 1u, &f) && form_at(l, f) == FORM_LIST)
+    return lower_fold(l, b, v, f);
   for (size_t k = 0; v != NULL && v->argc == 2 && k < sizeof BINARY_OPS / sizeof BINARY_OPS[0]; k++)
     if (is_op(v, BINARY_OPS[k].op)) {
       const IrExpr *x = lower_expr(l, b, v->args[0]);
@@ -470,16 +547,10 @@ static int lower_list_writes(Low *l, Stmts *b, Stmts *stores, const Value *v, ui
    words, which no read reaches (C-c10-1). A cons chain stores its words, then
    the length N + count. */
 static int lower_list_write(Low *l, Stmts *b, Stmts *stores, const Value *v, uint32_t field) {
-  Word slot;
   uint64_t count = 0;
   if (val_is(v, OP_NIL)) return push_store(l, stores, ir_const(l, field), ir_const(l, 0));
-  IrExpr *base = new_expr(l, IR_EXPR_WORD);
-  unsigned char *w = base != NULL ? low_alloc(l, sizeof(Word)) : NULL;
-  if (w == NULL) return 0;
-  word_u64(slot, field);
-  word_hash(w, slot, NULL);
-  base->word = w;
-  const IrExpr *n = ir_set(l, b, ir_sload(l, ir_const(l, field)));
+  const IrExpr *base = list_base(l, field);
+  const IrExpr *n = base != NULL ? ir_set(l, b, ir_sload(l, ir_const(l, field))) : NULL;
   if (n == NULL || !lower_list_writes(l, b, stores, v, field, base, n, &count)) return 0;
   return push_store(l, stores, ir_const(l, field), ir_binary(l, IR_OP_ADD64, n, ir_const(l, count)));
 }

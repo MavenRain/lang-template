@@ -1,5 +1,12 @@
 1 wipe ok
-2 pushOne ok
-3 pushTwo ok
-4 pushOne ok
-state makeState 9u (cons 3u (cons 9u (cons 1u (cons 7u nil))))
+2 paidSum = 0u
+3 pushOne ok
+4 paidSum = 7u
+5 pushTwo ok
+6 paidSum = 17u
+7 weighted = 719u
+8 pushOne ok
+9 paidSum = 20u
+10 weighted = 7193u
+11 settle ok
+state makeState 20u (cons 3u (cons 9u (cons 1u (cons 7u nil))))

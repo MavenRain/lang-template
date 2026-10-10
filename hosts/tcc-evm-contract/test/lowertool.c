@@ -170,8 +170,68 @@ static int abi_boundaries(void) {
 #define ENTRY "def entry : Env -> State -> Option (Prod State (List Out)) := fun env s => "
 #define TOKEN "0x00000000000000000000000000000000000000aa"
 
+/* Compare a closed reference fold and the build boundary for its open view. */
+static int fold_regression(const char *name, const char *step, const char *seed, int expected, int refused) {
+  char source[4096];
+  snprintf(source, sizeof source,
+    "state State := makeState (items : List U256)\n"
+    "def init : State := makeState (cons 7u (cons 0u nil))\n"
+    "def d : U256 := 0u\n"
+    "def value : Env -> State -> U256 -> U256 := fun env s d => fold (%s) (%s) (items s)\n"
+    "def answer : U256 := fold (%s) (%s) (items init)\n", step, seed, step, seed);
+  Arena arena;
+  Diag diag;
+  DeclList decls;
+  Machine machine;
+  FILE *out = tmpfile();
+  if (out == NULL) return 0;
+  arena_init(&arena, (size_t)1 << 25);
+  diag_init(&diag);
+  int ok = front_load(&arena, name, source, strlen(source), &decls, &diag)
+    && check_program(&arena, &decls, &machine, &diag);
+  if (ok) {
+    const Value *answer = NULL;
+    machine.fuel = EVAL_FUEL_STEPS;
+    for (uint32_t i = 0; i < machine.def_count; i++)
+      if (strcmp(machine.defs[i].name, "answer") == 0) answer = def_value(&machine, i);
+    Word got, want;
+    word_u64(want, (uint64_t)expected);
+    ok = expected < 0 ? answer != NULL && answer->kind == VAL_TRAP
+      : word_of(answer, got) && memcmp(got, want, sizeof got) == 0;
+    if (ok) {
+      int status = lower_build(&machine, TARGET_PART_MAIN, out);
+      ok = refused ? status == 1 && diag.code != NULL && strcmp(diag.code, "REFUSE_LOWER") == 0 && ftell(out) == 0
+        : status == 0 && !diag.set && ftell(out) > 0;
+    }
+  }
+  if (!ok) {
+    fprintf(stderr, "FAIL fold %s\n", name);
+    if (diag.set) diag_print(&diag, stderr);
+  }
+  fclose(out);
+  arena_release(&arena);
+  return ok;
+}
+
 int main(void) {
   int ok = 1;
+  const char *head = "fun (x : U256) (acc : U256) => x";
+  const char *sum = "fun (x : U256) (acc : U256) => u256Add x acc";
+  ok &= fold_regression("discard-static-seed-trap", head, "u256Div 1u 0u", 7, 1);
+  ok &= fold_regression("discard-dynamic-seed-trap", head, "u256Div 1u d", 7, 1);
+  ok &= fold_regression("discard-conditional-seed-trap", head,
+    "flagIf (u256Eq d 0u) (u256Div 1u 0u) 0u", 7, 1);
+  ok &= fold_regression("discard-intermediate-trap",
+    "fun (x : U256) (acc : U256) => flagIf (u256Eq x 7u) x (u256Div 1u 0u)", "0u", 7, 1);
+  ok &= fold_regression("discard-dynamic-step-trap",
+    "fun (x : U256) (acc : U256) => flagIf (u256Eq x 7u) x (u256Div 1u x)", "0u", 7, 1);
+  ok &= fold_regression("discard-trap-in-one-branch",
+    "fun (x : U256) (acc : U256) => flagIf (u256Eq x 7u) x (u256Add acc 1u)", "u256Div 1u 0u", 7, 1);
+  ok &= fold_regression("safe-head", head, "0u", 7, 0);
+  ok &= fold_regression("strict-sum", sum, "0u", 7, 0);
+  ok &= fold_regression("strict-trap-seed", sum, "u256Div 1u 0u", -1, 0);
+  ok &= fold_regression("strict-conditional",
+    "fun (x : U256) (acc : U256) => flagIf (u256Eq x 7u) (u256Add x acc) (u256Mul x acc)", "0u", 7, 0);
   ok &= abi_regression("list-cons-other-field",
     "state State := makeState (items : List U256) (other : List U256)\n"
     "def init : State := makeState nil nil\n"
