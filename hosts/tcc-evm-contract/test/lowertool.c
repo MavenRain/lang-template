@@ -121,8 +121,9 @@ static int order_regression(const char *name, const char *defs, int local_cond) 
     const IrStmt *holder = NULL;
     for (size_t i = 0; i < body.count; i++) {
       const IrStmt *s = body.items[i];
-      unsigned logs = (s->kind == IR_STMT_LOG) + statements(s->body, IR_STMT_LOG)
-        + statements(s->otherwise, IR_STMT_LOG);
+      unsigned logs = (s->kind == IR_STMT_LOG || s->kind == IR_STMT_CALL)
+        + statements(s->body, IR_STMT_LOG) + statements(s->otherwise, IR_STMT_LOG)
+        + statements(s->body, IR_STMT_CALL) + statements(s->otherwise, IR_STMT_CALL);
       if (s->kind == IR_STMT_SSTORE) last_store = i + 1;
       if (logs > 0 && holder == NULL) {
         first_log = i + 1;
@@ -132,7 +133,8 @@ static int order_regression(const char *name, const char *defs, int local_cond) 
     ok = holder != NULL && first_log > last_store
       && body.items[body.count - 1]->kind == IR_STMT_STOP
       && (!local_cond || (holder->kind == IR_STMT_IF && holder->expr->kind == IR_EXPR_LOCAL
-                          && statements(holder->body, IR_STMT_LOG) == 0));
+                          && statements(holder->body, IR_STMT_LOG) == 0
+                          && statements(holder->body, IR_STMT_CALL) == 0));
   }
   if (!ok) {
     fprintf(stderr, "FAIL lower %s (functions %zu)\n", name, program.func_count);
@@ -223,6 +225,7 @@ static int abi_boundaries(void) {
 
 #define ENTRY "def entry : Env -> State -> Option (Prod State (List Out)) := fun env s => "
 #define LOGGED "event Logged (x : U256)\n"
+#define TOKEN "0x00000000000000000000000000000000000000aa"
 
 /* Compare a closed reference fold and the build boundary for its open view. */
 static int fold_regression(const char *name, const char *step, const char *seed, int expected, int refused) {
@@ -370,6 +373,20 @@ int main(void) {
     "some (pair s (cons (Logged 7u) nil))\n", 0);
   ok &= order_regression("effect-order-stored-flag", LOGGED ENTRY
     "some (pair (makeState 9) (flagIf (natEq (counter s) 0) nil (cons (Logged 7u) nil)))\n", 1);
+  ok &= regression("pay-ok", ENTRY
+    "some (pair (makeState 9) (cons (pay " TOKEN " " TOKEN " 7u) nil))\n",
+    1, 0, 0, 0, 0, 0);
+  ok &= regression("pay-trap", ENTRY
+    "some (pair (makeState 9) (cons (pay " TOKEN " " TOKEN " (u256Div 7u 0u)) nil))\n",
+    1, 0, 1, 0, 0, 0);
+  ok &= regression("pay-symbolic-div",
+    "def entry : Env -> State -> U256 -> Option (Prod State (List Out)) := fun env s x => "
+    "some (pair (makeState 9) (cons (pay " TOKEN " " TOKEN " (u256Div 7u x)) nil))\n",
+    1, 1, 0, 1, 0, 0);
+  ok &= order_regression("call-order-pay", ENTRY
+    "some (pair (makeState 9) (cons (pay " TOKEN " " TOKEN " 7u) nil))\n", 0);
+  ok &= order_regression("call-order-stored-pull", ENTRY
+    "some (pair (makeState 9) (flagIf (natEq (counter s) 0) nil (cons (pull " TOKEN " " TOKEN " " TOKEN " 7u) nil)))\n", 1);
   if (ok) puts("lower regressions: passed");
   return ok ? 0 : 1;
 }

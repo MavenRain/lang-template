@@ -606,9 +606,7 @@ static int is_emit(const Low *l, const Value *v) {
 }
 
 /* The name of V when V is the prelude constructor pay or pull of Out, else
-   NULL. The CALL lowering of slice K4d is not done yet, thus an entry that
-   makes a pay or a pull gives REFUSE_LOWER and no build drops a transfer
-   (C-K4d-1). */
+   NULL. Each pay or pull becomes one CALL to its token (C-K4d-6). */
 static const char *out_call(const Low *l, const Value *v) {
   const CtorInfo *c = is_op(v, OP_CTOR) && v->inst < l->m->ctor_count ? &l->m->ctors[v->inst] : NULL;
   return c != NULL && !c->event && c->family < l->m->family_count
@@ -638,8 +636,33 @@ static int lower_log(Low *l, Stmts *b, Stmts *fx, const CtorInfo *c, const Value
   return push(l, fx, s);
 }
 
+/* A pay or a pull in the OUT list (C-K4d-6): force the token word (field 0)
+   and each argument word into B, then put one CALL into FX. pay =
+   transfer(payTo, payAmount), pull = transferFrom(pullFrom, pullTo,
+   pullAmount); the contract is the sender (C-K4-14). */
+static int lower_call(Low *l, Stmts *b, Stmts *fx, const CtorInfo *c, const Value *v) {
+  const IrExpr **fields = v->argc > 1u ? low_alloc(l, v->argc * sizeof *fields) : NULL;
+  IrScalar *types = fields != NULL ? low_alloc(l, v->argc * sizeof *types) : NULL;
+  const IrExpr *token = types != NULL ? ir_set(l, b, lower_expr(l, b, v->args[0])) : NULL;
+  if (token == NULL) return 0;
+  for (uint32_t i = 1; i < v->argc; i++) {
+    fields[i - 1u] = ir_set(l, b, lower_expr(l, b, v->args[i]));
+    if (fields[i - 1u] == NULL) return 0;
+    types[i - 1u] = scalar_of(field_type(l->m, c, i));
+  }
+  IrStmt *s = new_stmt(l, IR_STMT_CALL);
+  if (s == NULL) return 0;
+  s->name = strcmp(c->name, "pay") == 0 ? "transfer" : "transferFrom";
+  s->expr = token;
+  s->types = types;
+  s->fields = fields;
+  s->field_count = v->argc - 1u;
+  return push(l, fx, s);
+}
+
 /* Force the words of the outputs into B before any state store, and put one
-   LOG for each event into FX, in the order of the list (C-K4-13). The caller
+   LOG for each event and one CALL for each pay or pull into FX, in the order
+   of the list (C-K4-13, C-K4d-6). The caller
    pushes FX after the state write (C-K4d-2). Keep flagIf branches lazy,
    including at List positions and within event fields. */
 static int lower_out_words(Low *l, Stmts *b, Stmts *fx, const Value *v) {
@@ -649,8 +672,7 @@ static int lower_out_words(Low *l, Stmts *b, Stmts *fx, const Value *v) {
   if (val_is(v, OP_NIL)) return 1;
   if (is_emit(l, v))
     return diag_fail(l->m->diag, "REFUSE_LOWER", l->entry, "emit has no EVM form; use a named event");
-  if (call != NULL)
-    return diag_fail(l->m->diag, "REFUSE_LOWER", l->entry, "%s has no EVM form yet; the CALL lowering comes in slice K4d", call);
+  if (call != NULL) return lower_call(l, b, fx, c, v);
   if (c != NULL && c->event) return lower_log(l, b, fx, c, v);
   if (is_op(v, OP_FLAG_IF) && v->argc == 3) {
     /* With effects in a branch, the condition goes into a local: FX tests it

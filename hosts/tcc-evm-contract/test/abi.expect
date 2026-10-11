@@ -25,12 +25,6 @@ exit 0
 # test/lower/emit.lang --text
 langc: REFUSE_LOWER: stamp: emit has no EVM form; use a named event
 exit 1
-# test/lower/pay.lang --text
-langc: REFUSE_LOWER: give: pay has no EVM form yet; the CALL lowering comes in slice K4d
-exit 1
-# test/lower/pull.lang --text
-langc: REFUSE_LOWER: take: pull has no EVM form yet; the CALL lowering comes in slice K4d
-exit 1
 # test/contract-nocall.lang
 [
 {"type":"function","name":"deposit","inputs":[{"name":"","type":"uint256"}],"outputs":[],"stateMutability":"nonpayable"},

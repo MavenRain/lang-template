@@ -293,6 +293,38 @@ static int emit_stmt(Emit *e, const IrStmt *s) {
     asm_op(a, EVM_OP_LOG1);
     return 1;
   }
+  case IR_STMT_CALL: { /* a pay or a pull (C-K4-14, C-K4d-7): the call data after the scratch */
+    unsigned char selector[32];
+    uint64_t at = e->scratch + 64u;
+    EvmBuild result = event_topic(s, selector);
+    if (result != EVM_BUILD_OK) { e->failure = result; return 0; }
+    asm_push_word(a, selector); /* bytes 0 to 3 stay; argument 0 writes over the other 28 */
+    emit_store(a, at);
+    for (size_t i = 0; i < s->field_count; i++) {
+      if (!emit_expr(e, s->fields[i])) return 0;
+      emit_store(a, at + 4u + 32u * (uint64_t)i);
+    }
+    asm_push(a, 32);
+    asm_push(a, e->scratch);
+    asm_push(a, 4u + 32u * (uint64_t)s->field_count);
+    asm_push(a, at);
+    asm_op(a, EVM_OP_PUSH0); /* 0 wei, all gas (C-K4d-7) */
+    if (!emit_expr(e, s->expr)) return 0;
+    emit_ops(a, (const Op[]){EVM_OP_GAS, EVM_OP_CALL, EVM_OP_ISZERO}, 3);
+    asm_jump_if(a, e->revert);
+    /* Success: 32 bytes of return data equal to 1, or no return data from a token with code. */
+    asm_op(a, EVM_OP_RETURNDATASIZE);
+    asm_push(a, 32);
+    asm_op(a, EVM_OP_EQ);
+    asm_push(a, e->scratch);
+    asm_op(a, EVM_OP_MLOAD);
+    asm_push(a, 1);
+    emit_ops(a, (const Op[]){EVM_OP_EQ, EVM_OP_AND, EVM_OP_RETURNDATASIZE, EVM_OP_ISZERO}, 4);
+    if (!emit_expr(e, s->expr)) return 0;
+    emit_ops(a, (const Op[]){EVM_OP_EXTCODESIZE, EVM_OP_ISZERO, EVM_OP_ISZERO, EVM_OP_AND, EVM_OP_OR, EVM_OP_ISZERO}, 6);
+    asm_jump_if(a, e->revert);
+    return 1;
+  }
   case IR_STMT_REPEAT: { /* as Wasm: the body sees the counter values N down to 1 */
     Label top = asm_label(a), end = asm_label(a);
     uint64_t at = 32u * (uint64_t)s->counter;

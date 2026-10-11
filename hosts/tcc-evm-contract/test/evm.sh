@@ -93,7 +93,7 @@ chain() {
 # the output of `cast sig` or `cast sig-event` (foundry cast 0.3.0, K4c s6).
 # The gate does not run cast.
 for _p in test/contract-nocall.lang examples/map.lang examples/residuals.lang examples/events.lang \
-  test/lower/emit.lang test/lower/pay.lang test/lower/pull.lang; do
+  test/lower/emit.lang; do
   echo "# $_p --text"
   build/langc abi "$_p" --text 2>&1
   echo "exit $?"

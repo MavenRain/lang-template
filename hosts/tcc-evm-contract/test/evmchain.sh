@@ -143,10 +143,12 @@ deploy() {
 # step NOW CALLER INPUT: call the receiver (the code in tmp/code, the storage
 # in tmp/raw) from CALLER with INPUT at TIMESTAMP NOW. result gets ok, revert,
 # trap (the Trap() selector), error, `revert HEX` or `out HEX`. tmp/raw and
-# tmp/got get the storage after the call.
+# tmp/got get the storage after the call. A set alloc (`,"0xADDR":{...}`)
+# adds accounts to the prestate (test/diff.sh: the mock token); then tmp/raw
+# holds the storage of all accounts.
 step() {
   _st=$(awk '{ printf "%s\"0x%s\":\"0x%s\"", (NR > 1 ? "," : ""), $1, $2 }' "$tmp/raw")
-  genesis "$1" "\"0x$receiver\":{\"balance\":\"0x0\",\"code\":\"0x$(cat "$tmp/code")\",\"storage\":{$_st}}"
+  genesis "$1" "\"0x$receiver\":{\"balance\":\"0x0\",\"code\":\"0x$(cat "$tmp/code")\",\"storage\":{$_st}}${alloc:-}"
   evm run --prestate "$tmp/pre.json" --receiver "0x$receiver" --sender "$2" --input "$3" \
     --dump >"$tmp/dump" 2>&1 || return 1
   result=$(awk '
