@@ -15,7 +15,7 @@ mkdir -p "$tmp"
 
 # For each example with a state, `langc build` and `evm run --create --dump`
 # must give the storage of `langc eval PROG init` (the reference evaluator).
-for prog in test/contract-nocall.lang examples/map.lang examples/storage.lang; do
+for prog in examples/contract.lang examples/map.lang examples/storage.lang; do
   builds=$((builds + 1))
   checks=$((checks + 1))
   : >"$tmp/want.rows"

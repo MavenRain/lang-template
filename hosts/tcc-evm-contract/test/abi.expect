@@ -1,4 +1,4 @@
-# test/contract-nocall.lang --text
+# examples/contract.lang --text
 0xb6b55f25 deposit(uint256) entry
 0x2e1a7d4d withdraw(uint256) entry
 0xc85e07b9 stamp() entry
@@ -25,7 +25,7 @@ exit 0
 # test/lower/emit.lang --text
 langc: REFUSE_LOWER: stamp: emit has no EVM form; use a named event
 exit 1
-# test/contract-nocall.lang
+# examples/contract.lang
 [
 {"type":"function","name":"deposit","inputs":[{"name":"","type":"uint256"}],"outputs":[],"stateMutability":"nonpayable"},
 {"type":"function","name":"withdraw","inputs":[{"name":"","type":"uint256"}],"outputs":[],"stateMutability":"nonpayable"},
