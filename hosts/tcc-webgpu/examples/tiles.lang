@@ -1,0 +1,29 @@
+-- Tiles: a Tile r c A holds a value of A at each index (i, j), i < r, j < c.
+-- tabulate builds a tile, at reads a cell, sumTo and foldTo reduce over an
+-- index. natDiv and natMod split a flat index. Each proof is refl.
+def eye : Tile 2 2 U32 := tabulate 2 2 (fun i j => flagIf (natEq i j) 1u 0u)
+def wide : Tile 2 3 U32 := tabulate 2 3 (fun i j => flagIf (natEq j (natAdd i 1)) 1u 0u)
+def mask : Tile 2 2 Flag := tabulate 2 2 (fun i j => natLe i j)
+def left : Tile 2 2 U32 := tabulate 2 2 (fun i j => flagIf (natEq i j) 2u 1u)
+def right : Tile 2 2 U32 := tabulate 2 2 (fun i j => flagIf (natEq i j) 5u 7u)
+def gemm : Tile 2 2 U32 := tabulate 2 2 (fun i j => sumTo 2 (fun k => u32Mul (at left i k) (at right k j)))
+def rowSum : U32 := sumTo 2 (fun k => at gemm 0 k)
+def quotient : Nat := natDiv 17 5
+def modulus : Nat := natMod 17 5
+def divide : Nat -> Nat -> Nat := fun x y => natDiv x y
+def remainder : Nat -> Nat -> Nat := fun x y => natMod x y
+def eyeCorner : Eq U32 (at eye 1 1) 1u := refl
+def eyeOff : Eq U32 (at eye 0 1) 0u := refl
+def wideCell : Eq U32 (at wide 0 1) 1u := refl
+def wideLast : Eq U32 (at wide 1 2) 1u := refl
+def wideFlat : Eq U32 (at wide (natDiv 5 3) (natMod 5 3)) 1u := refl
+def sumFour : Eq U32 (sumTo 4 (fun k => 3u)) 12u := refl
+def sumMixed : Eq U32 (sumTo 5 (fun k => flagIf (natLe k 2) 1u 10u)) 23u := refl
+def sumWrap : Eq U32 (sumTo 2 (fun k => 4294967295u)) 4294967294u := refl
+def gemmCells : Eq (Tile 2 2 U32) gemm (tabulate 2 2 (fun i j => flagIf (natEq i j) 17u 19u)) := refl
+def power : Eq U32 (foldTo 3 (fun x y => u32Mul x y) 1u (fun k => 2u)) 8u := refl
+def powerMixed : Eq U32 (foldTo 4 (fun x y => u32Mul x y) 1u (fun k => flagIf (natEq k 0) 1u 3u)) 27u := refl
+def foldOrder : Eq U32 (foldTo 3 (fun x y => u32Sub y x) 0u (fun k => flagIf (natEq k 1) 5u 2u)) 4294967295u := refl
+def divRow : Eq Nat (natDiv 7 2) 3 := refl
+def modRow : Eq Nat (natMod 7 2) 1 := refl
+def maskCells : Eq (Tile 2 2 Flag) mask (tabulate 2 2 (fun i j => flagIf (natEq i 1) (natEq j 1) (natLe 0 j))) := refl

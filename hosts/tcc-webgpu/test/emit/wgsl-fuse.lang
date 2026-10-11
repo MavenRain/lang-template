@@ -1,0 +1,3 @@
+-- D9: the writer fuses at of a tabulate, so the column j must stay inside the 2 x 2 tabulate of sq.
+def sq : Tile 2 3 U32 -> Tile 2 2 U32 := fun t => tabulate 2 2 (fun a b => at t a b)
+def fuseE : Tile 2 3 U32 -> Tile 2 3 U32 := fun t => tabulate 2 3 (fun i j => at (sq t) i j)

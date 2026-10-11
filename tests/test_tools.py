@@ -151,10 +151,10 @@ class GeneratorTests(unittest.TestCase):
                          'static const char LANG_NAME[] = "example-lang";\n')
         self.assertIn(": make check\n", result.stdout)
 
-    def test_tcc_wasm_tcc_evm_tcc_evm_dao_tcc_evm_anchor_and_tcc_js_hosts(self):
+    def test_tcc_wasm_tcc_evm_tcc_evm_dao_tcc_evm_anchor_tcc_js_and_tcc_webgpu_hosts(self):
         for host, target in (("tcc-wasm", "src/wasm.c"), ("tcc-evm", "src/evm.c"),
                              ("tcc-evm-dao", "src/evm.c"), ("tcc-evm-anchor", "src/evm.c"),
-                             ("tcc-js", "src/json.c")):
+                             ("tcc-js", "src/json.c"), ("tcc-webgpu", "src/json.c")):
             with self.subTest(host=host):
                 kit = self.template / "hosts" / host
                 (kit / "src").mkdir(parents=True)
@@ -200,14 +200,24 @@ class GeneratorTests(unittest.TestCase):
         self.assertFalse(self.dest.exists())
 
     def test_tcc_json_document_key_is_reserved(self):
-        # tcc-js writes the same JSON document with --json.
-        for host in ("tcc-json", "tcc-js"):
+        # tcc-js and tcc-webgpu write the same JSON document with --json.
+        for host in ("tcc-json", "tcc-js", "tcc-webgpu"):
             with self.subTest(host=host):
                 result = run("bash", str(self.template / "bin/new-lang.sh"),
                              "instances", host, str(self.dest))
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("reserved by the tcc-json document format", result.stderr)
                 self.assertFalse(self.dest.exists())
+
+
+    def test_tcc_webgpu_kernels_key_is_reserved(self):
+        # The tcc-webgpu document has a kernels key after instances.
+        result = run("bash", str(self.template / "bin/new-lang.sh"),
+                     "kernels", "tcc-webgpu", str(self.dest))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("NAME 'kernels' is reserved by the tcc-webgpu document format",
+                      result.stderr)
+        self.assertFalse(self.dest.exists())
 
 
 class HostListTests(unittest.TestCase):

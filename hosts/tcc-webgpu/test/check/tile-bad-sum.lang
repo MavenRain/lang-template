@@ -1,0 +1,1 @@
+def wrong : Eq U32 (sumTo 4 (fun k => 3u)) 13u := refl

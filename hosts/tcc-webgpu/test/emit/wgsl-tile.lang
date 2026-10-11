@@ -1,0 +1,2 @@
+-- A tile in a position other than the first argument of at has no WGSL form.
+def pickE : Tile 2 2 U32 -> Tile 2 2 U32 := fun t => tabulate 2 2 (fun i j => at (flagIf (natEq i 0) t t) i j)

@@ -1,0 +1,2 @@
+-- D9: the C evaluator runs the else arm only for j < 2; WGSL select runs both arms, so j + 1 reaches 3.
+def elseE : Tile 2 3 U32 -> Tile 2 3 U32 := fun t => tabulate 2 3 (fun i j => flagIf (natLe 2 j) 0u (at t i (natAdd j 1)))

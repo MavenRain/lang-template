@@ -1,0 +1,1 @@
+{"{{LANG}}":1,"instances":[{"name":"greeting","type":"Str","value":"hi"},{"name":"blank","type":"Str","value":""},{"name":"quoted","type":"Str","value":"hi \u0022x\u0022 \u005c \u000a ok"},{"name":"accent","type":"Str","value":"café"},{"name":"snow","type":"Str","value":"☃ 2°"},{"name":"priceTag","type":"Str","value":"1200"}]}

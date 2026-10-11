@@ -1,0 +1,1 @@
+def wrong : Flag := strEq 1 "a"

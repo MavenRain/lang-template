@@ -1,0 +1,2 @@
+-- D9: (i + 65535) * 65537 reaches 2^32 at i = 1: a u64 in C, a u32 that wraps in WGSL.
+def wrapE : Tile 2 3 U32 -> Tile 2 3 U32 := fun t => tabulate 2 3 (fun i j => at t (natMod (natMul (natAdd i 65535) 65537) 2) j)

@@ -1,0 +1,32 @@
+-- Kernels: an entry is a program definition from tiles (and U32 values) to
+-- a tile, with closed shapes. `langc build --wgsl` writes one WGSL compute
+-- shader for each entry (test/wgsl/kernels.wgsl). Each proof is refl: the C
+-- evaluator runs the entry on closed tiles.
+def ofNat : Nat -> U32 := fun n => sumTo n (fun k => 1u)
+def a23 : Tile 2 3 U32 := tabulate 2 3 (fun i j => ofNat (natAdd (natMul i 3) (natAdd j 1)))
+def b32 : Tile 3 2 U32 := tabulate 3 2 (fun i j => ofNat (natAdd (natMul i 2) (natAdd j 7)))
+def upper : Tile 2 3 Flag := tabulate 2 3 (fun i j => natLe i j)
+def copyE : Tile 2 3 U32 -> Tile 2 3 U32 := fun t => tabulate 2 3 (fun i j => at t i j)
+def addE : Tile 2 3 U32 -> Tile 2 3 U32 -> Tile 2 3 U32 := fun x y => tabulate 2 3 (fun i j => u32Add (at x i j) (at y i j))
+def gemmE : Tile 2 3 U32 -> Tile 3 2 U32 -> Tile 2 2 U32 := fun x y => tabulate 2 2 (fun i j => sumTo 3 (fun k => u32Mul (at x i k) (at y k j)))
+def trE : Tile 2 3 U32 -> Tile 3 2 U32 := fun t => tabulate 3 2 (fun i j => at t j i)
+def rowSumE : Tile 2 3 U32 -> Tile 2 1 U32 := fun t => tabulate 2 1 (fun i j => sumTo 3 (fun k => at t i k))
+def rowProdE : Tile 2 3 U32 -> Tile 2 1 U32 := fun t => tabulate 2 1 (fun i j => foldTo 3 (fun x y => u32Mul x y) 1u (fun k => at t i k))
+def scaleE : U32 -> Tile 2 3 U32 -> Tile 2 3 U32 := fun s t => tabulate 2 3 (fun i j => u32Mul s (at t i j))
+def maskE : Tile 2 3 Flag -> Tile 2 3 U32 -> Tile 2 3 U32 := fun f t => tabulate 2 3 (fun i j => flagIf (at f i j) (at t i j) 0u)
+def upperE : Tile 2 3 Flag -> Tile 2 3 Flag := fun f => tabulate 2 3 (fun i j => flagIf (natLe i j) (at f i j) flagNo)
+def shiftE : Tile 2 3 U32 -> Tile 2 2 U32 := fun t => tabulate 2 2 (fun i j => at (trE t) (natAdd j 1) (natSub 1 i))
+def offsetE : Tile 2 3 U32 -> Tile 2 3 U32 := fun t => tabulate 2 3 (fun i j => u32Add (at t i j) (at a23 i j))
+def copyCells : Eq (Tile 2 3 U32) (copyE a23) a23 := refl
+def addCell : Eq U32 (at (addE a23 a23) 1 2) 12u := refl
+def addCells : Eq (Tile 2 3 U32) (addE a23 a23) (tabulate 2 3 (fun i j => ofNat (natMul 2 (natAdd (natMul i 3) (natAdd j 1))))) := refl
+def gemmCells : Eq (Tile 2 2 U32) (gemmE a23 b32) (tabulate 2 2 (fun i j => flagIf (natEq i 0) (flagIf (natEq j 0) 58u 64u) (flagIf (natEq j 0) 139u 154u))) := refl
+def trCells : Eq (Tile 3 2 U32) (trE a23) (tabulate 3 2 (fun i j => ofNat (natAdd (natMul j 3) (natAdd i 1)))) := refl
+def rowSumCells : Eq (Tile 2 1 U32) (rowSumE a23) (tabulate 2 1 (fun i j => flagIf (natEq i 0) 6u 15u)) := refl
+def rowProdCells : Eq (Tile 2 1 U32) (rowProdE a23) (tabulate 2 1 (fun i j => flagIf (natEq i 0) 6u 120u)) := refl
+def scaleWrap : Eq U32 (at (scaleE 4294967295u a23) 0 1) 4294967294u := refl
+def scaleCells : Eq (Tile 2 3 U32) (scaleE 4294967295u a23) (tabulate 2 3 (fun i j => u32Sub 0u (at a23 i j))) := refl
+def maskCells : Eq (Tile 2 3 U32) (maskE upper a23) (tabulate 2 3 (fun i j => flagIf (natEq i 0) (ofNat (natAdd j 1)) (flagIf (natEq j 0) 0u (ofNat (natAdd j 4))))) := refl
+def upperCells : Eq (Tile 2 3 Flag) (upperE upper) upper := refl
+def shiftCells : Eq (Tile 2 2 U32) (shiftE a23) (tabulate 2 2 (fun i j => flagIf (natEq i 0) (ofNat (natAdd j 5)) (ofNat (natAdd j 2)))) := refl
+def offsetCells : Eq (Tile 2 3 U32) (offsetE a23) (addE a23 a23) := refl

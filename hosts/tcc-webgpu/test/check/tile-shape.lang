@@ -1,0 +1,2 @@
+def g : Tile 2 2 U32 := tabulate 2 2 (fun i j => 0u)
+def h : Tile 3 2 U32 := g

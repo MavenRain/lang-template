@@ -1,0 +1,1 @@
+def wrong : U32 := natAdd 1 2

@@ -1,0 +1,3 @@
+-- The entry g_in0 comes first; the entry g gives it the name of its parameter binding.
+def g_in0 : Tile 1 1 U32 -> Tile 1 1 U32 := fun t => t
+def g : Tile 1 1 U32 -> Tile 1 1 U32 := fun t => t

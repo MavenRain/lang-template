@@ -1,0 +1,4 @@
+-- A natDiv or natMod in a shader needs a closed divisor above 0: in WGSL
+-- x % 0u is x, but in the C evaluator it is a trap. The divisor here is never
+-- 0, but the writer cannot see that.
+def modE : Tile 2 2 U32 -> Tile 2 2 U32 := fun t => tabulate 2 2 (fun i j => at t (natMod i (natAdd j 1)) 0)

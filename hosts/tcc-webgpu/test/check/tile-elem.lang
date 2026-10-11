@@ -1,0 +1,1 @@
+def bad : Tile 1 1 Nat := tabulate 1 1 (fun i j => i)

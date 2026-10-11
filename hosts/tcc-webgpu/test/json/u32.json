@@ -1,0 +1,1 @@
+{"{{LANG}}":1,"instances":[{"name":"most","type":"U32","value":4294967295},{"name":"zero","type":"U32","value":0},{"name":"area","type":"U32","value":196608},{"name":"wrapped","type":"U32","value":1},{"name":"counts","type":"List U32","value":[1,4294967295]}]}

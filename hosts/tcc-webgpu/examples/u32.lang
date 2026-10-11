@@ -1,0 +1,16 @@
+-- U32: the ring Z/2^32. u32Add, u32Sub and u32Mul wrap. Each proof is refl.
+def most : U32 := 4294967295u
+def zero : U32 := 0u
+def area : U32 := u32Mul 65536u 3u
+def wrapped : U32 := u32Add 4294967295u 2u
+def counts : List U32 := cons 1u (cons 4294967295u nil)
+def double : U32 -> U32 := fun x => u32Add x x
+def addWrap : Eq U32 (u32Add 4294967295u 1u) 0u := refl
+def mulWrap : Eq U32 (u32Mul 65536u 65536u) 0u := refl
+def mulLarge : Eq U32 (u32Mul 3000000000u 3u) 410065408u := refl
+def mulMost : Eq U32 (u32Mul 4294967295u 4294967295u) 1u := refl
+def subWrap : Eq U32 (u32Sub 0u 1u) 4294967295u := refl
+def subBelow : Eq U32 (u32Sub 3u 5u) 4294967294u := refl
+def addZero : Eq U32 (u32Add 7u 0u) 7u := refl
+def mulOne : Eq U32 (u32Mul 7u 1u) 7u := refl
+def doubleWrap : Eq U32 (double 2147483648u) 0u := refl

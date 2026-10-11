@@ -1,0 +1,1 @@
+def wrong : Eq U32 (u32Add 4294967295u 1u) 1u := refl

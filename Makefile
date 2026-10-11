@@ -58,6 +58,11 @@ check: doc-check test
 	else \
 	  echo "check: skip hosts/tcc-media (no Makefile)"; \
 	fi
+	@if [ -f hosts/tcc-webgpu/Makefile ]; then \
+	  $(MAKE) -C hosts/tcc-webgpu check; \
+	else \
+	  echo "check: skip hosts/tcc-webgpu (no Makefile)"; \
+	fi
 	@if [ -d hosts/tcc-wasm ] && [ -d hosts/tcc-evm ]; then \
 	  for path in $(TCC_SHARED); do \
 	    diff -r hosts/tcc-wasm/$$path hosts/tcc-evm/$$path || exit 1; \

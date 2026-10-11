@@ -1,0 +1,2 @@
+-- D9: the column index j + 1 reaches 3, outside the 2 x 3 parameter.
+def outE : Tile 2 3 U32 -> Tile 2 3 U32 := fun t => tabulate 2 3 (fun i j => at t i (natAdd j 1))

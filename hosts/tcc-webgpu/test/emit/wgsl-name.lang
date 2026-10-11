@@ -1,0 +1,2 @@
+-- An entry name must be a WGSL identifier.
+def copy' : Tile 1 1 U32 -> Tile 1 1 U32 := fun t => t

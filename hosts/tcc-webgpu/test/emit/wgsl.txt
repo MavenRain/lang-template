@@ -1,0 +1,9 @@
+wgsl-tile.lang WGSL_FORM
+wgsl-name.lang WGSL_FORM
+wgsl-div.lang WGSL_FORM
+wgsl-bounds.lang BOUNDS
+wgsl-fuse.lang BOUNDS
+wgsl-else.lang BOUNDS
+wgsl-wrap.lang WGSL_FORM
+wgsl-collide.lang WGSL_FORM
+wgsl-collide2.lang WGSL_FORM
