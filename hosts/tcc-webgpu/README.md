@@ -153,9 +153,12 @@ function with the name of the entry:
 - Parameter `P` (from 0) is the read-only storage buffer `NAME_inP`, an
   `array<u32>` at `@group(0) @binding(B)`. A `U32` parameter is a buffer
   with 1 cell. The result is the read_write storage buffer `NAME_out`.
-  The binding numbers are unique in the module: the bindings of an entry
-  come after the bindings of the entries before it. An unused parameter
-  stays in the layout (`_ = arrayLength(&NAME_inP);`).
+  Each entry numbers its bindings from 0: parameter `P` has the binding
+  `P`, and the result has the binding that follows the last parameter.
+  Thus a binding is at most 7, for each count of entries, and the entries
+  share the binding numbers. WGSL permits this, because no entry point
+  uses a buffer of another entry (the resource interface of a shader).
+  An unused parameter stays in the layout (`_ = arrayLength(&NAME_inP);`).
 - One invocation writes one result cell. The cell index is `i * C + j`
   for row `i` and column `j` (row-major order).
 - A `Flag` is a u32 0 or 1 in a buffer, and a bool in an expression.
@@ -346,6 +349,7 @@ executable at build time. `domain/README.md` tells how to replace it.
 | Type and normal-form printer depth | 200 | `src/front/eval.c` |
 | JS evaluation | No fuel and no depth limit: deep recursion stops at the Node stack limit | `src/js.c` |
 | WGSL entry parameters | 7 | `src/wgsl.c:12` |
+| WGSL binding number | 7, for each count of entries (each entry numbers its bindings from 0) | `src/wgsl.c` |
 | WGSL bound variables, for each entry | 64 | `src/wgsl.c:14` |
 | WGSL workgroup size | 64 | `src/wgsl.c:16` |
 | WGSL entry tile | 1048576 cells | `src/wgsl.c:19` |

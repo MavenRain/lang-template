@@ -80,7 +80,6 @@ typedef struct {
 typedef struct {
   Machine *m;
   const char *name;
-  uint32_t binding; /* the binding of parameter 0 */
   Shape params[WGSL_PARAMS_MAX];
   int used[WGSL_PARAMS_MAX];
   uint32_t param_count;
@@ -628,9 +627,14 @@ static void shape_text(Buf *doc, const Shape *s) {
   put(doc, s->elem == TY_BOOL ? " Flag" : " U32");
 }
 
+/* Each entry numbers its bindings from 0: parameter P has the binding P, and
+   the result has the binding param_count. Thus a binding is at most 7, for
+   each count of entries. Two entries can share a binding number, because no
+   entry point uses a buffer of another entry (WGSL: the resource interface
+   of a shader). */
 static void binding_line(Buf *doc, const Kernel *k, uint32_t p, const char *access) {
   put(doc, "@group(0) @binding(");
-  put_u64(doc, (uint64_t)k->binding + p);
+  put_u64(doc, p);
   put(doc, ") var<storage, ");
   put(doc, access);
   put(doc, "> ");
@@ -728,7 +732,7 @@ static void manifest_shape(const Kernel *k, uint32_t p, const Shape *s, Buf *man
     put(man, "_out");
   }
   put(man, "\",\"binding\":");
-  put_u64(man, (uint64_t)k->binding + p);
+  put_u64(man, p);
   if (s->tile) {
     put(man, ",\"rows\":");
     put_u64(man, s->rows);
@@ -784,7 +788,6 @@ static int collides(Kernel *k, const char *const *names, const uint32_t *counts,
 int wgsl_module(Machine *m, WgslModule *out) {
   Buf doc = {0};
   Buf man = {0};
-  uint32_t binding = 0;
   uint32_t entries = 0;
   uint32_t i;
   int ok = 1;
@@ -801,13 +804,11 @@ int wgsl_module(Machine *m, WgslModule *out) {
     int found;
     memset(&k, 0, sizeof k);
     k.m = m;
-    k.binding = binding;
     m->def = m->defs[i].name;
     found = m->defs[i].origin == ORIGIN_PROGRAM ? entry_shape(&k, &m->defs[i]) : 0;
     ok = found >= 0 && (found == 0 || (!collides(&k, names, counts, entries) && emit_kernel(&k, i, &doc)));
     if (ok && found > 0)
       write_manifest(&k, &man);
-    binding += found > 0 ? k.param_count + 1u : 0u;
     names[entries] = k.name;
     counts[entries] = k.param_count;
     entries += found > 0 ? 1u : 0u;
