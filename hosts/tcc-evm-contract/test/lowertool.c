@@ -327,7 +327,7 @@ int main(void) {
     "{\"type\":\"event\",\"name\":\"Paid\",\"inputs\":[{\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false}],\"anonymous\":false}\n"
     "]\n", 1);
   ok &= abi_boundaries();
-  int output_status = system("build/langc abi test/contract-nocall.lang 1</dev/null 2>/dev/null");
+  int output_status = system("build/langc abi examples/contract.lang 1</dev/null 2>/dev/null");
   if (output_status == -1 || !WIFEXITED(output_status) || WEXITSTATUS(output_status) != 2) {
     fprintf(stderr, "FAIL abi buffered-write (status %d)\n", output_status);
     ok = 0;

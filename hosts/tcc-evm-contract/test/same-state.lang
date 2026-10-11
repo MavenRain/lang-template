@@ -1,0 +1,18 @@
+-- An entry with an unchanged state and a LOG (O-d7-1). `ping` keeps the state
+-- `s` and emits one Paid event with the stored total. The chain test of
+-- test/evm.sh runs test/same-state.script on this file: after a `ping` step the
+-- storage must not change, and the step must have one LOG1.
+event Paid (to : Addr) (amount : U256)
+
+state State := makeState (deposited : U256)
+def init : State := makeState 0u
+
+-- Entry: add the amount to the total, and emit one event.
+def deposit : (env : Env) -> (s : State) -> (amount : U256) -> Option (Prod State (List Out)) :=
+  fun (env : Env) (s : State) (amount : U256) =>
+    some (pair (makeState (u256Add (deposited s) amount)) (cons (Paid (caller env) amount) nil))
+
+-- Entry: keep the state, and emit one event with the stored total.
+def ping : (env : Env) -> (s : State) -> Option (Prod State (List Out)) :=
+  fun (env : Env) (s : State) =>
+    some (pair s (cons (Paid (caller env) (deposited s)) nil))
