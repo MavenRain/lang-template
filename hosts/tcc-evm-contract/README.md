@@ -24,7 +24,7 @@ The TinyCC host kit of retainer-lang. It compiles the contract language to EVM b
 | K4b | Entries, dispatch and call data decode | Done |
 | K4c | EVM views, logs, ABI and List writes | Done |
 | K4d | Token calls (pay and pull) and the differential test | Done |
-| After K4d | See the retainer-lang brief | Planned |
+| After K4d | None: retainer-lang closes at K4d | Closed |
 
 
 ## U256 and Addr (slice K2)
