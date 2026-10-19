@@ -19,7 +19,7 @@ b=00000000000000000000000000000000000000b2
 c=00000000000000000000000000000000000000c3
 one=$(pad 1)
 zero=$(pad 0)
-topic=$(keccak "$(printf '%s' 'Transfer(address,address,uint256)' | od -An -tx1 | tr -d ' \n')")
+topic=$(keccak "$(printf '%s' 'Transfer(address,address,uint256)' | od -An -v -tx1 | tr -d ' \n')")
 build/asmtool mock >"$tmp/mock" || { echo "FAIL mock: asmtool mock"; exit 1; }
 
 # tin TO AMOUNT, fin FROM TO AMOUNT: the call data of transfer and transferFrom.

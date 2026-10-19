@@ -159,7 +159,7 @@ if rg -n '(?-u:[\x80-\xff])|[ \t]$' "$tmp"/*.js >/dev/null; then
   fail=$((fail + 1))
 fi
 for f in "$tmp"/*.js; do
-  end=$(tail -c 2 "$f" | od -An -tx1 | tr -d ' \n')
+  end=$(tail -c 2 "$f" | od -An -v -tx1 | tr -d ' \n')
   [ "${end#??}" = "0a" ] && [ "$end" != "0a0a" ] || { echo "FAIL js $f: not one final newline"; fail=$((fail + 1)); }
 done
 build/langc build examples/laws.lang --js "$tmp/again.js" --selftest && cmp -s "$tmp/again.js" "$tmp/laws.js" \

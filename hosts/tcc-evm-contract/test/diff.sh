@@ -26,7 +26,7 @@ prog=examples/contract.lang
 token=00000000000000000000000000000000000000ee
 user=00000000000000000000000000000000000000bb
 neg=$(printf '%62s' '' | tr ' ' f)e2
-topic=$(keccak "$(printf '%s' 'Transfer(address,address,uint256)' | od -An -tx1 | tr -d ' \n')")
+topic=$(keccak "$(printf '%s' 'Transfer(address,address,uint256)' | od -An -v -tx1 | tr -d ' \n')")
 build/asmtool mock >"$tmp/mock" || { echo "FAIL diff: asmtool mock"; exit 1; }
 
 # lg FROM TO AMOUNT: the logs line of one Transfer LOG3 of the mock.

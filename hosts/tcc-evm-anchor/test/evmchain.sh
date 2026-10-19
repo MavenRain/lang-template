@@ -46,7 +46,7 @@ member() { printf '%040x' $((177 + $1)); }
 word() { printf '%64s' "$1" | tr ' ' 0; }
 
 # text STRING: the bytes of STRING in hex.
-text() { printf '%s' "$1" | od -An -tx1 | tr -d ' \n'; }
+text() { printf '%s' "$1" | od -An -v -tx1 | tr -d ' \n'; }
 
 # keccak HEX: keccak256 of the bytes HEX. The contract copies the call data
 # to memory, hashes it and returns the hash.

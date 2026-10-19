@@ -14,7 +14,7 @@ trapped="0xae96083a $revert"
 # keccak256 of the bytes HEX: CALLDATACOPY, SHA3, then RETURN of 32 bytes.
 keccak() { evm run --code 365f5f37365f205f5260205ff3 --input "$1" 2>&1 | cut -c3-; }
 # The selector of the signature TEXT.
-sel() { keccak "$(printf '%s' "$1" | od -An -tx1 | tr -d ' \n')" | cut -c1-8; }
+sel() { keccak "$(printf '%s' "$1" | od -An -v -tx1 | tr -d ' \n')" | cut -c1-8; }
 # A 32-byte word from hex digits.
 w() { printf '%064s' "$1" | tr ' ' 0; }
 

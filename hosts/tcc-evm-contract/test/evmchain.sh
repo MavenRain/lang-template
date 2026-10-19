@@ -11,7 +11,7 @@ config='{"chainId":1,"homesteadBlock":0,"eip150Block":0,"eip155Block":0,"eip158B
 # keccak HEX: keccak256 of the bytes HEX (CALLDATACOPY, SHA3, RETURN of 32 bytes).
 keccak() { evm run --code 365f5f37365f205f5260205ff3 --input "$1" 2>&1 | cut -c3-; }
 # sel TEXT: the selector of the signature TEXT.
-sel() { keccak "$(printf '%s' "$1" | od -An -tx1 | tr -d ' \n')" | cut -c1-8; }
+sel() { keccak "$(printf '%s' "$1" | od -An -v -tx1 | tr -d ' \n')" | cut -c1-8; }
 # pad H: H as 64 hex digits.
 pad() { printf '%64s' "$1" | tr ' ' 0; }
 
