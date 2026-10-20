@@ -29,11 +29,25 @@ typedef struct {
   uint32_t f;
 } Slot;
 
+typedef struct Buf Buf;
+
+/* The operand of a value lowered earlier: one lowering per Value pointer
+   (flag 51). A block finds the entries of its own memo and of the blocks it
+   is placed in (flag 52), so a local set in a sibling arm is never read. */
 typedef struct {
+  const Value *key;
+  Operand op;
+} Memo;
+
+struct Buf {
   const IrStmt **items;
   size_t count;
   size_t cap;
-} Buf;
+  const Buf *parent; /* the block this one is placed in, or NULL */
+  Memo *memo;        /* open addressing on the Value pointer */
+  size_t memo_count;
+  size_t memo_cap; /* 0 or a power of two */
+};
 
 typedef struct {
   Machine *m;
@@ -140,12 +154,71 @@ static Operand slot_get(Low *l, Slot s) {
   return operand(ex_local(l, s.w), ex_local(l, s.f));
 }
 
-static Buf buf_empty(void) {
+/* A new block, placed in PARENT (NULL for the body of an entry). */
+static Buf buf_under(const Buf *parent) {
   Buf b;
-  b.items = NULL;
-  b.count = 0;
-  b.cap = 0;
+  memset(&b, 0, sizeof b);
+  b.parent = parent;
   return b;
+}
+
+/* The slot of KEY in MEMO (CAP entries): its entry, or the free slot
+   where it goes. */
+static size_t memo_slot(const Memo *memo, size_t cap, const Value *key) {
+  size_t i = (((size_t)(uintptr_t)key) >> 4) * 2654435761u & (cap - 1u);
+  while (memo[i].key != NULL && memo[i].key != key)
+    i = (i + 1u) & (cap - 1u);
+  return i;
+}
+
+/* 1 and OUT when V was lowered into B or into a block B is placed in. */
+static int memo_find(const Buf *b, const Value *v, Operand *out) {
+  size_t i;
+  for (; b != NULL; b = b->parent) {
+    if (b->memo_cap == 0)
+      continue;
+    i = memo_slot(b->memo, b->memo_cap, v);
+    if (b->memo[i].key == v) {
+      *out = b->memo[i].op;
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int memo_grow(Low *l, Buf *b) {
+  size_t cap = b->memo_cap == 0 ? 16u : b->memo_cap * 2u;
+  Memo *grown = arena_alloc(l->m->arena, cap * sizeof *grown);
+  size_t i;
+  if (grown == NULL)
+    return oom(l);
+  memset(grown, 0, cap * sizeof *grown);
+  for (i = 0; i < b->memo_cap; i++)
+    if (b->memo[i].key != NULL)
+      grown[memo_slot(grown, cap, b->memo[i].key)] = b->memo[i];
+  b->memo = grown;
+  b->memo_cap = cap;
+  return 1;
+}
+
+/* Records V as O in the memo of B. The table stays at most half full. */
+static int memo_put(Low *l, Buf *b, const Value *v, Operand o) {
+  size_t i;
+  if (2u * (b->memo_count + 1u) > b->memo_cap && !memo_grow(l, b))
+    return 0;
+  i = memo_slot(b->memo, b->memo_cap, v);
+  if (b->memo[i].key == NULL)
+    b->memo_count++;
+  b->memo[i].key = v;
+  b->memo[i].op = o;
+  return 1;
+}
+
+/* A value with a lowering worth one memo entry: an operation or a stuck
+   operation (flag 54). A number, a type, a variable and a closure are
+   constants, a level or a diagnostic. */
+static int memo_kind(const Value *v) {
+  return v->kind == VAL_OP || v->kind == VAL_STUCK;
 }
 
 static int buf_grow(Low *l, Buf *b) {
@@ -255,7 +328,7 @@ static int if_flag(Low *l, Buf *b, const IrExpr *f, const Buf *yes, const Buf *n
 
 /* Runs IN when the trap flag F is 0. When F is 1, RES gets the trap. */
 static int guard(Low *l, Buf *b, const IrExpr *f, Slot res, const Buf *in) {
-  Buf trap = buf_empty();
+  Buf trap = buf_under(b);
   return store(l, &trap, res, trap_value(l)) && if_flag(l, b, f, &trap, in);
 }
 
@@ -630,7 +703,7 @@ static int nat_bin(Low *l, Buf *b, const Value *v, IrOp op, int carry, Operand *
 static int field_of(Low *l, Buf *b, const Value *xv, uint32_t k, Operand *out) {
   Operand x;
   Slot res = slot_new(l);
-  Buf in = buf_empty();
+  Buf in = buf_under(b);
   *out = slot_get(l, res);
   return lower(l, b, xv, &x) && store(l, &in, res, field_op(l, x.w, k)) && guard(l, b, x.f, res, &in);
 }
@@ -638,9 +711,9 @@ static int field_of(Low *l, Buf *b, const Value *xv, uint32_t k, Operand *out) {
 static int flag_if(Low *l, Buf *b, const Value *v, Operand *out) {
   Operand c;
   Slot res = slot_new(l);
-  Buf yes = buf_empty();
-  Buf no = buf_empty();
-  Buf in = buf_empty();
+  Buf yes = buf_under(b);
+  Buf no = buf_under(b);
+  Buf in = buf_under(b);
   *out = slot_get(l, res);
   return lower(l, b, v->args[0], &c) && lower_into(l, &yes, v->args[1], res) && lower_into(l, &no, v->args[2], res) &&
          if_flag(l, &in, c.w, &yes, &no) && guard(l, b, c.f, res, &in);
@@ -653,7 +726,7 @@ static int cases_of(Low *l, Buf *b, const Value *xv, const Value *const *cases, 
   Operand *args;
   Operand x;
   Slot res = slot_new(l);
-  Buf in = buf_empty();
+  Buf in = buf_under(b);
   Buf arm;
   uint32_t i;
   uint32_t k;
@@ -663,7 +736,7 @@ static int cases_of(Low *l, Buf *b, const Value *xv, const Value *const *cases, 
   if (!lower(l, b, xv, &x))
     return 0;
   for (i = 0; i < n; i++) {
-    arm = buf_empty();
+    arm = buf_under(b);
     args = arena_alloc(l->m->arena, ((size_t)fields[i] + 1u) * sizeof *args);
     if (args == NULL)
       return oom(l);
@@ -739,14 +812,14 @@ static int walk_step(Low *l, Buf *b, const Walk *w, uint32_t k) {
    the last node comes first. */
 static int walk(Low *l, Buf *b, Operand x, const uint32_t *rec, uint32_t n, Walk *w) {
   IrBlock *arms = arena_alloc(l->m->arena, ((size_t)n + 1u) * sizeof *arms);
-  Buf body = buf_empty();
+  Buf body = buf_under(b);
   Buf arm;
   uint32_t i;
   *w = walk_new(l);
   if (arms == NULL)
     return oom(l);
   for (i = 0; i < n; i++) {
-    arm = buf_empty();
+    arm = buf_under(&body);
     if (!(rec[i] == NO_REC ? set(l, &arm, w->cont, ex_const(l, 0)) : walk_step(l, &arm, w, rec[i])))
       return 0;
     arms[i] = block_of(&arm);
@@ -778,7 +851,7 @@ static int chain_end(Low *l, Buf *b, const Walk *w, Buf *body) {
 /* OUT := a trap tail when the flag local END is 1, else nil. */
 static int tail_init(Low *l, Buf *b, uint32_t end, Slot out) {
   Operand nil;
-  Buf in = buf_empty();
+  Buf in = buf_under(b);
   return block_ops(l, &in, 0, NULL, 0, &nil) && store(l, &in, out, nil) && guard(l, b, ex_local(l, end), out, &in);
 }
 
@@ -798,8 +871,8 @@ static int fold_list(Low *l, Buf *b, const Value *v, Operand *out) {
   Operand args[2];
   Walk w;
   Slot acc = slot_new(l);
-  Buf in = buf_empty();
-  Buf body = buf_empty();
+  Buf in = buf_under(b);
+  Buf body = buf_under(b);
   *out = slot_get(l, acc);
   args[1] = slot_get(l, acc);
   return lower(l, b, v->args[2], &x) && walk(l, b, x, LIST_REC, 2u, &w) && lower_into(l, &in, v->args[1], acc) &&
@@ -814,7 +887,7 @@ static int list_map(Low *l, Buf *b, const Value *v, Operand *out) {
   Walk w;
   Slot res = slot_new(l);
   Slot ys = slot_new(l);
-  Buf body = buf_empty();
+  Buf body = buf_under(b);
   *out = slot_get(l, res);
   return lower(l, b, v->args[1], &x) && walk(l, b, x, LIST_REC, 2u, &w) && tail_init(l, b, w.end, res) &&
          chain_head(l, &body, &w, &h) && apply_into(l, &body, v->args[0], &h, 1u, ys) &&
@@ -831,9 +904,9 @@ static int list_bind(Low *l, Buf *b, const Value *v, Operand *out) {
   Walk u;
   Slot res = slot_new(l);
   Slot rs = slot_new(l);
-  Buf body = buf_empty();
-  Buf inner = buf_empty();
-  Buf none = buf_empty();
+  Buf body = buf_under(b);
+  Buf inner = buf_under(&body);
+  Buf none = buf_under(&body);
   *out = slot_get(l, res);
   return lower(l, b, v->args[0], &x) && walk(l, b, x, LIST_REC, 2u, &w) && tail_init(l, b, w.end, res) &&
          chain_head(l, &body, &w, &h) && apply_into(l, &body, v->args[1], &h, 1u, rs) &&
@@ -851,10 +924,10 @@ static int list_filter(Low *l, Buf *b, const Value *v, Operand *out) {
   Walk w;
   Slot res = slot_new(l);
   Slot ts = slot_new(l);
-  Buf body = buf_empty();
-  Buf keep = buf_empty();
-  Buf drop = buf_empty();
-  Buf test = buf_empty();
+  Buf body = buf_under(b);
+  Buf keep = buf_under(&body);
+  Buf drop = buf_under(&body);
+  Buf test = buf_under(&body);
   *out = slot_get(l, res);
   return lower(l, b, v->args[1], &x) && walk(l, b, x, LIST_REC, 2u, &w) && tail_init(l, b, w.end, res) &&
          chain_head(l, &body, &w, &h) && apply_into(l, &body, v->args[0], &h, 1u, ts) && prepend(l, &keep, h, res) &&
@@ -881,12 +954,12 @@ static int unfold_step(Low *l, Buf *b, const Walk *w, const Value *g, Slot seed)
   Operand p;
   Slot rs = slot_new(l);
   Operand r = slot_get(l, rs);
-  Buf stop = buf_empty();
-  Buf stop_some = buf_empty();
-  Buf push = buf_empty();
-  Buf some = buf_empty();
-  Buf none = buf_empty();
-  Buf tag = buf_empty();
+  Buf stop = buf_under(b);
+  Buf stop_some = buf_under(b);
+  Buf push = buf_under(b);
+  Buf some = buf_under(b);
+  Buf none = buf_under(b);
+  Buf tag = buf_under(b);
   return apply_into(l, b, g, &s, 1u, rs) && field_at(l, &some, r.w, 0, &p) && unfold_push(l, &push, w, p.w, seed) &&
          unfold_stop(l, &stop_some, w) && if_flag(l, &some, p.f, &stop_some, &push) &&
          set(l, &none, w->cont, ex_const(l, 0)) && if_flag(l, &tag, ex_load(l, r.w, 0), &some, &none) &&
@@ -901,9 +974,9 @@ static int unfold(Low *l, Buf *b, const Value *v, Operand *out) {
   Walk w = walk_new(l);
   Slot res = slot_new(l);
   Slot seed = slot_new(l);
-  Buf in = buf_empty();
-  Buf step = buf_empty();
-  Buf body = buf_empty();
+  Buf in = buf_under(b);
+  Buf step = buf_under(&in);
+  Buf body = buf_under(&in);
   *out = slot_get(l, res);
   return lower(l, b, v->args[1], &lim) && set(l, &in, w.rev, ex_const(l, 0)) && set(l, &in, w.count, ex_const(l, 0)) &&
          set(l, &in, w.end, ex_const(l, 0)) && set(l, &in, w.cont, ex_const(l, 1)) &&
@@ -940,7 +1013,7 @@ static int fam_switch(Low *l, Buf *b, const IrExpr *addr, const Value *v, const 
   if (arms == NULL)
     return oom(l);
   for (i = 0; i < fam->ctor_count; i++) {
-    arm = buf_empty();
+    arm = buf_under(b);
     if (!((rec[i] != NO_REC) == rec_arms ? fam_case(l, &arm, addr, v->args[i], &l->m->ctors[fam->first_ctor + i], rec[i], acc)
                                          : store(l, &arm, acc, trap_value(l))))
       return 0;
@@ -957,8 +1030,8 @@ static int family_spine(Low *l, Buf *b, const Value *v, const uint32_t *rec, Ope
   Operand x;
   Walk w;
   Slot acc = slot_new(l);
-  Buf in = buf_empty();
-  Buf body = buf_empty();
+  Buf in = buf_under(b);
+  Buf body = buf_under(b);
   *out = slot_get(l, acc);
   return lower(l, b, v->args[fam->ctor_count], &x) && walk(l, b, x, rec, fam->ctor_count, &w) &&
          fam_switch(l, &in, ex_local(l, w.cur), v, rec, 0, acc) && guard(l, b, ex_local(l, w.end), acc, &in) &&
@@ -997,7 +1070,7 @@ static int family_fold(Low *l, Buf *b, const Value *v, Operand *out) {
 /* The two arms of an option or a sum, behind the guard on the flag of X. */
 static int two_arms(Low *l, Buf *b, Operand x, const Buf *a0, const Buf *a1, Slot res) {
   IrBlock *arms = arena_alloc(l->m->arena, 2u * sizeof *arms);
-  Buf in = buf_empty();
+  Buf in = buf_under(b);
   if (arms == NULL)
     return oom(l);
   arms[0] = block_of(a0);
@@ -1018,8 +1091,8 @@ static int carrier_map(Low *l, Buf *b, const Value *v, Operand *out) {
   Operand t;
   Slot res = slot_new(l);
   Slot ts = slot_new(l);
-  Buf a0 = buf_empty();
-  Buf a1 = buf_empty();
+  Buf a0 = buf_under(b);
+  Buf a1 = buf_under(b);
   *out = slot_get(l, res);
   t = slot_get(l, ts);
   return carrier_begin(l, b, v->args[1], res, &x, &a0, &a1, &p) && apply_into(l, &a1, v->args[0], &p, 1, ts) &&
@@ -1030,8 +1103,8 @@ static int carrier_bind(Low *l, Buf *b, const Value *v, Operand *out) {
   Operand x;
   Operand p;
   Slot res = slot_new(l);
-  Buf a0 = buf_empty();
-  Buf a1 = buf_empty();
+  Buf a0 = buf_under(b);
+  Buf a1 = buf_under(b);
   *out = slot_get(l, res);
   return carrier_begin(l, b, v->args[0], res, &x, &a0, &a1, &p) && apply_into(l, &a1, v->args[1], &p, 1, res) &&
          two_arms(l, b, x, &a0, &a1, res);
@@ -1043,11 +1116,11 @@ static int carrier_filter(Low *l, Buf *b, const Value *v, Operand *out) {
   Operand y;
   Slot res = slot_new(l);
   Slot ts = slot_new(l);
-  Buf a0 = buf_empty();
-  Buf a1 = buf_empty();
-  Buf keep = buf_empty();
-  Buf drop = buf_empty();
-  Buf test = buf_empty();
+  Buf a0 = buf_under(b);
+  Buf a1 = buf_under(b);
+  Buf keep = buf_under(&a1);
+  Buf drop = buf_under(&a1);
+  Buf test = buf_under(&a1);
   *out = slot_get(l, res);
   return carrier_begin(l, b, v->args[1], res, &x, &a0, &a1, &p) && apply_into(l, &a1, v->args[0], &p, 1, ts) &&
          store(l, &keep, res, x) && block_ops(l, &drop, 0, NULL, 0, &y) && store(l, &drop, res, y) &&
@@ -1065,8 +1138,8 @@ static int fold_nat(Low *l, Buf *b, const Value *v, Operand *out) {
   Operand n;
   Operand a;
   Slot acc = slot_new(l);
-  Buf in = buf_empty();
-  Buf body = buf_empty();
+  Buf in = buf_under(b);
+  Buf body = buf_under(&in);
   *out = slot_get(l, acc);
   a = slot_get(l, acc);
   return lower(l, b, v->args[2], &n) && lower_into(l, &in, v->args[1], acc) && apply_into(l, &body, v->args[0], &a, 1, acc) &&
@@ -1089,7 +1162,7 @@ static int proof_op(Low *l, Buf *b, const Value *v, uint32_t first, uint32_t cou
 static int transport(Low *l, Buf *b, const Value *v, Operand *out) {
   Operand proof;
   Slot res = slot_new(l);
-  Buf in = buf_empty();
+  Buf in = buf_under(b);
   *out = slot_get(l, res);
   return lower(l, b, v->args[1], &proof) && lower_into(l, &in, v->args[2], res) &&
          guard(l, b, proof.f, res, &in);
@@ -1202,21 +1275,23 @@ static int lower(Low *l, Buf *b, const Value *v, Operand *out) {
   int ok;
   if (v == NULL)
     return got(l, v);
+  if (memo_kind(v) && memo_find(b, v, out))
+    return 1;
   if (l->m->depth >= EVAL_DEPTH_LIMIT)
     return diag_fail(l->m->diag, "EVAL_DEPTH", l->m->def, "the lowering nests deeper than %u levels", EVAL_DEPTH_LIMIT);
   l->m->depth++;
   ok = lower_value(l, b, v, out);
   l->m->depth--;
-  return ok;
+  return ok && (!memo_kind(v) || memo_put(l, b, v, *out));
 }
 
 /* The entry INDEX, applied to a variable for each parameter. Only the
    result is strict: its flag runs TRAP. */
 static int lower_entry(Machine *m, uint32_t index, const Entry *e, IrFunc *fn) {
   Low l;
-  Buf body = buf_empty();
-  Buf trap = buf_empty();
-  Buf none = buf_empty();
+  Buf body = buf_under(NULL);
+  Buf trap = buf_under(NULL);
+  Buf none = buf_under(NULL);
   IrScalar *params = arena_alloc(m->arena, ((size_t)e->param_count + 1u) * sizeof *params);
   const Value *v;
   const Value *x;

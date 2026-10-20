@@ -133,6 +133,10 @@ lowering gives each value a word and a trap flag. A heap field keeps its
 word and its flag. The entry result is the only strict point: when its
 flag is set, the entry reverts with no data.
 
+The lowering lowers a value one time in a block. The blocks in that
+block use the same result, but the two arms of a branch do not share
+results.
+
 Strict traps are not correct here. Normalization at compile time drops
 terms that are not read, for example `first (pair a b)` gives `a`. The
 evaluator also computes both arms of `flagIf`. A strict trap would fire
@@ -180,11 +184,11 @@ how to replace the sample domain.
 | `examples: 10 checked, 0 failed` | `langc check` accepts each `examples/*.lang` file |
 | `parse refusals: 9 checked` | each `test/parse` file fails with the code in `test/parse/expect.txt`; one file has 1100 nested parentheses |
 | `check refusals: 19 checked` | each `test/check` mutant fails with the code in `test/check/expect.txt`; the `TYPE_REFL` message shows both normal forms |
-| `evals: 25 checked` | `langc eval` gives each result in `test/eval/expect.txt` |
+| `evals: 32 checked` | `langc eval` gives each result in `test/eval/expect.txt` |
 | `ir: 10 lowered` | `langc ir` lowers each example, with one `func` for each `abi` line |
 | `selftest: 9 snippets` | `build/asm-selftest` checks two keccak256 vectors and prints 9 assembler snippets (jumps, a label past byte 255, the 64-bit wrap and carry, a revert); each snippet runs in `evm` and gives the expected word |
 | `evm: 13 programs deployed` | `langc build` writes the creation code and the runtime code for each example and for `test/ir/spine.lang`, `test/ir/lazy.lang` and `test/ir/proof-trap.lang`; `evm --create run` of the creation code returns the runtime code; `abi` has one `NAME SELECTOR` line for each `func` and no repeated selector |
-| `differential: 683 cases, 0 mismatches` | `evm` runs each entry on the grid of `test/grid.awk`; each result is equal to the `langc eval` result, and a trap is equal to a trap |
+| `differential: 813 cases, 0 mismatches` | `evm` runs each entry on the grid of `test/grid.awk`; each result is equal to the `langc eval` result, and a trap is equal to a trap |
 | `evm: 8 edge calls` | calls on `examples/entries.lang` that `langc eval` does not cover: `pick 2 4 9`, an argument of 2^64, an argument of 2^64 - 1, an unknown selector, 1 byte of calldata, a selector with no arguments, and one call with value 0 and with value 1 |
 | `gate: 0 failures` | the sum of all failures |
 

@@ -71,9 +71,9 @@ on 2026-10-08 on AArch64 Darwin.
 
 ## Measured numbers
 
-- `make check` runs 683 differential cases on 13 modules, with
+- `make check` runs 813 differential cases on 13 modules, with
   0 mismatches.
-- `langc build examples/entries.lang` writes a module of 492 bytes for six
+- `langc build examples/entries.lang` writes a module of 1366 bytes for ten
   entries.
 
 ## HOST-LIMIT reasons

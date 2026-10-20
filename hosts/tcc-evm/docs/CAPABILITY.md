@@ -74,10 +74,10 @@ on 2026-10-08 on AArch64 Darwin with evm 1.14.12.
 
 ## Measured numbers
 
-- `make check` runs 683 differential cases on 13 programs, with
+- `make check` runs 813 differential cases on 13 programs, with
   0 mismatches, and 8 edge calls.
-- `langc build examples/entries.lang --runtime` writes 757 bytes of
-  runtime code for six entries. The creation code is 769 bytes.
+- `langc build examples/entries.lang --runtime` writes 2241 bytes of
+  runtime code for ten entries. The creation code is 2253 bytes.
 
 ## HOST-LIMIT reasons
 
